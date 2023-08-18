@@ -76,7 +76,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dogstatsd-replay-decoder"
+name = "dogstatsd-utils"
 version = "0.1.0"
 dependencies = [
  "byteorder",
