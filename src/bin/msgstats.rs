@@ -64,7 +64,7 @@ fn main() -> io::Result<()> {
             Ok(replay) => Box::new(replay),
             Err(e) => {
                 println!("Not a replay file, using regular bufreader, e: {}", e);
-                Box::new(BufDogStatsDReader::try_from(file_path).expect("Uh-oh. {}"))
+                Box::new(BufDogStatsDReader::try_from(file_path).expect("Uh-oh."))
             }
         }
     } else {

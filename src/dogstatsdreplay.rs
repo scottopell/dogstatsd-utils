@@ -1,5 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Cursor, Error, Read, Write};
+use std::sync::Arc;
 use std::{
     fs::File,
     io::{self, BufRead},
@@ -20,7 +21,8 @@ pub mod dogstatsd {
 }
 
 pub struct DogStatsDReplay {
-    bytes: Vec<u8>,
+    cursor: Cursor<Vec<u8>>,
+    len: usize,
 }
 
 impl DogStatsDReader for DogStatsDReplay {
@@ -63,19 +65,22 @@ pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
 }
 
 impl DogStatsDReplay {
-    pub fn read_msgs(&mut self) -> Result<Vec<String>, io::Error> {
-        // Read the 8-byte header
-        let header = &self.bytes[0..8];
-        check_replay_header(header)?;
+    pub fn new(mut bytes: Vec<u8>) -> Self {
+        // bytes contains the replay data minus the 8 byte header.
+        // 8 byte header should have already been checked before constructing this
+        bytes.drain(0..8);
+        let len = bytes.len();
+        let cursor = Cursor::new(bytes);
 
+        DogStatsDReplay { cursor, len }
+    }
+
+    pub fn read_msgs(&mut self) -> Result<Vec<String>, io::Error> {
         let mut msgs = Vec::new();
 
-        // Iterate through the protobuf messages
-        let mut cursor = Cursor::new(&self.bytes[8..]);
-        let msg_len = self.bytes.len() as u64 - 8;
-        while cursor.position() < msg_len - 4 {
+        while self.cursor.position() < self.len as u64 - 4 {
             // Read the little endian uint32 that gives the length of the next protobuf message
-            let message_length = match cursor.read_u32::<LittleEndian>() {
+            let message_length = match self.cursor.read_u32::<LittleEndian>() {
                 Ok(i) => i,
                 Err(error) => match error.kind() {
                     std::io::ErrorKind::UnexpectedEof => break,
@@ -85,14 +90,14 @@ impl DogStatsDReplay {
 
             // Read the protobuf message
             let mut message_buffer = vec![0; message_length as usize];
-            match cursor.read_exact(&mut message_buffer) {
+            match self.cursor.read_exact(&mut message_buffer) {
                 Ok(()) => {}
                 Err(error) => match error.kind() {
                     std::io::ErrorKind::UnexpectedEof => break,
                     _ => panic!(
                         "Unexpected error reading msg of length {} from offset {}: {}",
                         message_length,
-                        cursor.position(),
+                        self.cursor.position(),
                         error
                     ),
                 },
@@ -130,19 +135,18 @@ impl TryFrom<&mut File> for DogStatsDReplay {
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer)?;
 
+        // Decompress if we find zstd data
         if is_zstd(&buffer[0..4]) {
-            let buf = zstd::decode_all(Cursor::new(buffer))?;
-            Ok(DogStatsDReplay { bytes: buf })
-        } else {
-            // Not compressed, is it a replay file?
-            match check_replay_header(&buffer[0..8]) {
-                Ok(_) => Ok(DogStatsDReplay { bytes: buffer }),
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::NotFound {
-                        return Err(e);
-                    } else {
-                        panic!("Unexpected error: {}", e);
-                    }
+            buffer = zstd::decode_all(Cursor::new(buffer))?;
+        }
+        // Are the bytes likely to be a dogstatsd replay file?
+        match check_replay_header(&buffer[0..8]) {
+            Ok(_) => Ok(DogStatsDReplay::new(buffer)),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return Err(e);
+                } else {
+                    panic!("Unexpected error: {}", e);
                 }
             }
         }
