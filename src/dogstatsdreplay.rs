@@ -1,4 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
+use bytes::{Buf, Bytes};
+use std::fmt::write;
 use std::io::{Cursor, Error, Read, Write};
 use std::sync::Arc;
 use std::{
@@ -21,17 +23,34 @@ pub mod dogstatsd {
 }
 
 pub struct DogStatsDReplay {
-    cursor: Cursor<Vec<u8>>,
-    len: usize,
+    buf: Bytes,
 }
 
 impl DogStatsDReader for DogStatsDReplay {
-    fn read_msg(&mut self, _s: &mut String) -> std::io::Result<usize> {
-        // TODO -- last step before it works!
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Not Implemented yettt",
-        ))
+    fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+        if self.buf.remaining() < 4 {
+            return Ok(0); // end of stream
+        }
+
+        // Read the little endian uint32 that gives the length of the next protobuf message
+        let message_length = self.buf.get_u32_le() as usize;
+
+        if self.buf.remaining() < message_length {
+            return Ok(0); // end of stream
+        }
+
+        // Read the protobuf message
+        let msg_buf = self.buf.copy_to_bytes(message_length);
+
+        // Decode the protobuf message using the provided .proto file
+        let message = UnixDogstatsdMsg::decode(msg_buf)?;
+        match std::str::from_utf8(&message.payload) {
+            Ok(v) => {
+                s.insert_str(0, v);
+                Ok(1)
+            }
+            Err(e) => panic!("Invalid utf-8 sequence: {}", e),
+        }
     }
 }
 
@@ -42,6 +61,7 @@ pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
             "Not enough bytes to determine if its a replay file",
         ));
     }
+    // todo constify this
     let datadog_header = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
 
     // f0 is bitwise or'd with the file version, so to get the file version, lets do a bitwise xor
@@ -65,68 +85,58 @@ pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
 }
 
 impl DogStatsDReplay {
-    pub fn new(mut bytes: Vec<u8>) -> Self {
-        // bytes contains the replay data minus the 8 byte header.
-        // 8 byte header should have already been checked before constructing this
-        bytes.drain(0..8);
-        let len = bytes.len();
-        let cursor = Cursor::new(bytes);
-
-        DogStatsDReplay { cursor, len }
+    pub fn new(mut buf: Bytes) -> Self {
+        buf.advance(8); // eat the header
+        DogStatsDReplay { buf }
     }
 
     pub fn read_msgs(&mut self) -> Result<Vec<String>, io::Error> {
         let mut msgs = Vec::new();
 
-        while self.cursor.position() < self.len as u64 - 4 {
-            // Read the little endian uint32 that gives the length of the next protobuf message
-            let message_length = match self.cursor.read_u32::<LittleEndian>() {
-                Ok(i) => i,
-                Err(error) => match error.kind() {
-                    std::io::ErrorKind::UnexpectedEof => break,
-                    _ => panic!("Unexpected error reading msg length: {}", error),
-                },
-            };
-
-            // Read the protobuf message
-            let mut message_buffer = vec![0; message_length as usize];
-            match self.cursor.read_exact(&mut message_buffer) {
-                Ok(()) => {}
-                Err(error) => match error.kind() {
-                    std::io::ErrorKind::UnexpectedEof => break,
-                    _ => panic!(
-                        "Unexpected error reading msg of length {} from offset {}: {}",
-                        message_length,
-                        self.cursor.position(),
-                        error
-                    ),
-                },
+        let mut s = String::new();
+        while let Ok(num_read) = self.read_msg(&mut s) {
+            if num_read <= 0 {
+                break;
             }
-
-            // Decode the protobuf message using the provided .proto file
-            let message = UnixDogstatsdMsg::decode(bytes::Bytes::from(message_buffer))?;
-            let str_payload = match std::str::from_utf8(&message.payload) {
-                Ok(v) => v,
-                Err(e) => panic!("Invalid utf-8 sequence: {}", e),
-            };
-            msgs.push(str_payload.to_owned());
+            msgs.push(s.clone());
+            s.clear();
         }
 
         Ok(msgs)
     }
 
+    pub fn print_msgs(&mut self) {
+        let mut s = String::new();
+        loop {
+            match self.read_msg(&mut s) {
+                Ok(num_read) => {
+                    if num_read <= 0 {
+                        break;
+                    }
+                    println!("{}", s);
+                    s.clear();
+                }
+                Err(e) => eprintln!("Error while reading a message!, {}", e),
+            }
+        }
+    }
+
     pub fn write_to(&mut self, out_path: &str) -> Result<(), io::Error> {
         let mut output_file = File::create(out_path.to_owned())?;
 
-        let msgs = self.read_msgs()?;
-
-        for msg in msgs {
-            output_file.write_all(msg.as_bytes())?;
+        let mut s = String::new();
+        while let Ok(num_read) = self.read_msg(&mut s) {
+            if num_read <= 0 {
+                break;
+            }
+            output_file.write_all(s.as_bytes())?;
         }
 
         Ok(())
     }
 }
+
+// thiserror - crate is useful for defining custom errors easily
 
 impl TryFrom<&mut File> for DogStatsDReplay {
     type Error = io::Error;
@@ -139,9 +149,10 @@ impl TryFrom<&mut File> for DogStatsDReplay {
         if is_zstd(&buffer[0..4]) {
             buffer = zstd::decode_all(Cursor::new(buffer))?;
         }
+
         // Are the bytes likely to be a dogstatsd replay file?
         match check_replay_header(&buffer[0..8]) {
-            Ok(_) => Ok(DogStatsDReplay::new(buffer)),
+            Ok(_) => Ok(DogStatsDReplay::new(Bytes::from(buffer))),
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     return Err(e);

@@ -4,21 +4,36 @@ use std::io::Error;
 
 use dogstatsd_utils::dogstatsdreplay::DogStatsDReplay;
 
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// File containing dogstatsd replay data
+    #[arg(short, long)]
+    input: String,
+
+    /// Where output dogstatsd messages should go
+    #[arg(short, long)]
+    output: Option<String>,
+}
+
 fn main() -> Result<(), Error> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <file_path>", args[0]);
-        std::process::exit(1);
-    }
-    let file_path = &args[1];
-    let mut file = File::open(file_path)?;
+    let args = Args::parse();
+
+    let mut file = File::open(args.input)?;
 
     let mut replay = DogStatsDReplay::try_from(&mut file)?;
 
-    let destination_file_path = file_path.to_owned() + ".txt";
+    if let Some(outpath) = args.output {
+        if outpath == "-" {
+            replay.print_msgs();
+        } else {
+            replay.write_to(&outpath)?;
+            println!("Done! Result is in {}", outpath);
+        }
+    }
 
-    replay.write_to(&destination_file_path)?;
-
-    println!("Done! Result is in {}", destination_file_path);
     Ok(())
 }
