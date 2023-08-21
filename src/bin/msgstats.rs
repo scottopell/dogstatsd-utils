@@ -1,103 +1,79 @@
-use indicatif::{ProgressBar, ProgressStyle};
+use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
+use dogstatsd_utils::dogstatsdreplay::DogStatsDReplay;
+use dogstatsd_utils::msgstats::analyze_msgs;
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
+use std::path::Path;
 
-enum Kind {
-    Count,
-    Distribution,
-    Gauge,
-    Timer,
-    Histogram,
-    Set,
+struct BufDogStatsDReader {
+    reader: Box<dyn BufRead>,
 }
 
-struct DogStatsDMessageStats {
-    name_length: u16,
-    num_values: u16,
-    num_tags: u16,
-    num_ascii_tags: u16,
-    num_unicode_tags: u16,
-    kind: Option<Kind>,
+impl TryFrom<&Path> for BufDogStatsDReader {
+    type Error = io::Error;
+
+    fn try_from(p: &Path) -> Result<Self, Self::Error> {
+        // Q: why do I not need to declare this file as mutable
+        // and give a mutable reference to BufReader::new?
+        // Is it because I'm transfering ownership?
+        //
+        // Related:
+        // Why can I not do the same thing for
+        //  DogStatsDReplay::TryFrom<File>
+        // ?  I currently have
+        //  DogStatsDReplay::TryFrom<&mut File>
+        // but I don't like this. I read out some bytes from the file in TryFrom
+        // so the file is in a unknown state after.
+        // I'd rather transfer ownership to TryFrom, but I get an error saying
+        // "File must be mutable"
+        // Not sure what I'm missing here.
+
+        let file = File::open(p)?;
+
+        Ok(BufDogStatsDReader {
+            reader: Box::new(BufReader::new(file)),
+        })
+    }
+}
+
+impl DogStatsDReader for BufDogStatsDReader {
+    fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+        match self.reader.read_line(s) {
+            Ok(n) => {
+                return if n == 0 {
+                    // EOF
+                    Ok(0)
+                } else {
+                    Ok(1)
+                };
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let mut reader: Box<dyn BufRead> = if args.len() > 1 {
-        let file_path = &args[1];
-        let file = File::open(file_path)?;
-        let file_size = file.metadata()?.len();
-        let progress_bar = ProgressBar::new(file_size);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})")
-                .progress_chars("#>-"),
-        );
+    let mut reader: Box<dyn DogStatsDReader> = if args.len() > 1 {
+        let file_path = Path::new(&args[1]);
+        let mut file = File::open(file_path)?;
 
-        Box::new(BufReader::with_capacity(1024, progress_bar.wrap_read(file)))
-    } else {
-        Box::new(BufReader::new(io::stdin()))
-    };
-
-    let mut msg_stats: Vec<DogStatsDMessageStats> = Vec::new();
-
-    let mut line = String::new();
-    while reader.read_line(&mut line)? > 0 {
-        let parts: Vec<&str> = line.split('|').collect();
-        let name_and_values: Vec<&str> = parts[0].split(':').collect();
-
-        let name = name_and_values[0];
-
-        let last_part = parts[parts.len() - 1];
-        let mut num_tags = 0;
-        let mut num_ascii_tags = 0;
-        let mut num_unicode_tags = 0;
-        if last_part.starts_with("#") {
-            // these are tags
-            let tags = last_part.split(',');
-            for tag in tags {
-                num_tags += 1;
-                if tag.is_ascii() {
-                    num_ascii_tags += 1;
-                } else {
-                    num_unicode_tags += 1;
-                }
+        match DogStatsDReplay::try_from(&mut file) {
+            Ok(replay) => Box::new(replay),
+            Err(e) => {
+                println!("Not a replay file, using regular bufreader, e: {}", e);
+                Box::new(BufDogStatsDReader::try_from(file_path).expect("Uh-oh. {}"))
             }
         }
+    } else {
+        Box::new(BufDogStatsDReader {
+            reader: Box::new(BufReader::new(io::stdin())),
+        })
+    };
 
-        let kind = match parts.get(1) {
-            Some(s) => match *s {
-                "d" => Some(Kind::Distribution),
-                "ms" => Some(Kind::Timer),
-                "g" => Some(Kind::Gauge),
-                "c" => Some(Kind::Count),
-                "s" => Some(Kind::Set),
-                "h" => Some(Kind::Histogram),
-                _ => {
-                    println!("Found unknown msg type for dogstatsd msg: {}", line);
-                    None
-
-                }
-            }
-            _ => {
-                println!("Found unusual dogstatsd msg: {}", line);
-                None
-            }
-        };
-
-        let ds = DogStatsDMessageStats {
-            name_length: name.len() as u16,
-            num_values: name_and_values.len() as u16 - 1,
-            num_tags,
-            num_ascii_tags,
-            num_unicode_tags,
-            kind,
-        };
-
-        msg_stats.push(ds);
-        line.clear();
-    }
+    let msg_stats = analyze_msgs(reader)?;
 
     let total_messages = msg_stats.len();
     let mut distribution_of_values = HashMap::new();

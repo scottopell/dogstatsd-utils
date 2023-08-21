@@ -1,11 +1,17 @@
-use std::{fs::File, io};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Cursor, Error, Read, Write};
+use std::{
+    fs::File,
+    io::{self, BufRead},
+};
 extern crate zstd;
 
 use prost::Message;
 
-use crate::dogstatsdreplay::dogstatsd::unix::UnixDogstatsdMsg;
+use crate::{
+    dogstatsdreader::DogStatsDReader, dogstatsdreplay::dogstatsd::unix::UnixDogstatsdMsg,
+    zstd::is_zstd,
+};
 
 pub mod dogstatsd {
     pub mod unix {
@@ -14,52 +20,67 @@ pub mod dogstatsd {
 }
 
 pub struct DogStatsDReplay {
-    file: File,
-
+    bytes: Vec<u8>,
 }
+
+impl DogStatsDReader for DogStatsDReplay {
+    fn read_msg(&mut self, _s: &mut String) -> std::io::Result<usize> {
+        // TODO -- last step before it works!
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Not Implemented yettt",
+        ))
+    }
+}
+
+pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
+    if header.len() <= 4 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Not enough bytes to determine if its a replay file",
+        ));
+    }
+    let datadog_header = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
+
+    // f0 is bitwise or'd with the file version, so to get the file version, lets do a bitwise xor
+    let version = header[4] ^ 0xF0;
+
+    if version != 3 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Unexpected version, wanted 3 but found {}", version),
+        ));
+    }
+
+    if header[0..4] != datadog_header[0..4] {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Did not find replay header. Found: {:X?}", header),
+        ));
+    }
+
+    return Ok(());
+}
+
 impl DogStatsDReplay {
-
-    pub fn write_to(&mut self, out_path: &str) -> Result<(), io::Error> {
-        let mut output_file = File::create(out_path.to_owned())?;
-
-        // TODO detect zstd -- I'm hardcoding it to true
-        // 0xFD2FB528 are the magic bytes
-        // https://github.com/facebook/zstd/blob/3298a08076081dbfa8eba5b08c2167b06020c5ff/doc/zstd_compression_format.md#zstandard-frames
-        let is_zstd = true;
-
-        let mut buffer = Vec::new();
-        let f = &mut self.file;
-        f.read_to_end(&mut buffer)?;
-
-        // Decompress the buffer if it's Zstd
-        let decompressed_buffer = if is_zstd {
-            zstd::decode_all(Cursor::new(&buffer))?
-        } else {
-            buffer
-        };
-
+    pub fn read_msgs(&mut self) -> Result<Vec<String>, io::Error> {
         // Read the 8-byte header
-        let header = &decompressed_buffer[0..8];
+        let header = &self.bytes[0..8];
+        check_replay_header(header)?;
 
-        let datadog_header  = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
-
-        // f0 is bitwise or'd with the file version, so to get the file version, lets do a bitwise xor
-        let version = header[4] ^ 0xF0;
-
-        assert_eq!(version, 3);
-        assert_eq!(header[0..4], datadog_header[0..4], "Encountered unexpected header");
+        let mut msgs = Vec::new();
 
         // Iterate through the protobuf messages
-        let mut cursor = Cursor::new(&decompressed_buffer[8..]);
-        let msg_len = decompressed_buffer.len() as u64 - 8;
+        let mut cursor = Cursor::new(&self.bytes[8..]);
+        let msg_len = self.bytes.len() as u64 - 8;
         while cursor.position() < msg_len - 4 {
             // Read the little endian uint32 that gives the length of the next protobuf message
             let message_length = match cursor.read_u32::<LittleEndian>() {
                 Ok(i) => i,
                 Err(error) => match error.kind() {
                     std::io::ErrorKind::UnexpectedEof => break,
-                    _ => panic!("Unexpected error reading msg length: {}", error)
-                }
+                    _ => panic!("Unexpected error reading msg length: {}", error),
+                },
             };
 
             // Read the protobuf message
@@ -68,8 +89,13 @@ impl DogStatsDReplay {
                 Ok(()) => {}
                 Err(error) => match error.kind() {
                     std::io::ErrorKind::UnexpectedEof => break,
-                    _ => panic!("Unexpected error reading msg of length {} from offset {}: {}", message_length, cursor.position(), error)
-                }
+                    _ => panic!(
+                        "Unexpected error reading msg of length {} from offset {}: {}",
+                        message_length,
+                        cursor.position(),
+                        error
+                    ),
+                },
             }
 
             // Decode the protobuf message using the provided .proto file
@@ -78,22 +104,47 @@ impl DogStatsDReplay {
                 Ok(v) => v,
                 Err(e) => panic!("Invalid utf-8 sequence: {}", e),
             };
-            output_file.write_all(str_payload.as_bytes())?;
+            msgs.push(str_payload.to_owned());
+        }
+
+        Ok(msgs)
+    }
+
+    pub fn write_to(&mut self, out_path: &str) -> Result<(), io::Error> {
+        let mut output_file = File::create(out_path.to_owned())?;
+
+        let msgs = self.read_msgs()?;
+
+        for msg in msgs {
+            output_file.write_all(msg.as_bytes())?;
         }
 
         Ok(())
-
     }
-
 }
 
-impl TryFrom<&str> for DogStatsDReplay {
+impl TryFrom<&mut File> for DogStatsDReplay {
     type Error = io::Error;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match File::open(value.to_owned()) {
-            Ok(file) => Ok(DogStatsDReplay{ file }),
-            Err(e) => Err(e),
+    fn try_from(f: &mut File) -> Result<Self, Self::Error> {
+        let mut buffer = Vec::new();
+        f.read_to_end(&mut buffer)?;
+
+        if is_zstd(&buffer[0..4]) {
+            let buf = zstd::decode_all(Cursor::new(buffer))?;
+            Ok(DogStatsDReplay { bytes: buf })
+        } else {
+            // Not compressed, is it a replay file?
+            match check_replay_header(&buffer[0..8]) {
+                Ok(_) => Ok(DogStatsDReplay { bytes: buffer }),
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        return Err(e);
+                    } else {
+                        panic!("Unexpected error: {}", e);
+                    }
+                }
+            }
         }
     }
 }
