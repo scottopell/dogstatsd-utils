@@ -178,6 +178,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "clap",
+ "histo",
  "indicatif",
  "mime",
  "new_mime_guess",
@@ -249,6 +250,15 @@ name = "hermit-abi"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "443144c8cdadd93ebf52ddb4056d257f5b52c04d3c804e657d19eb73fc33668b"
+
+[[package]]
+name = "histo"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6a96a1c8acf372eefef3b065d800986a6d11abdc2c27cc61255513646b3df6c"
+dependencies = [
+ "streaming-stats",
+]
 
 [[package]]
 name = "indexmap"
@@ -351,6 +361,15 @@ checksum = "c2d684d1b59e0dc07b37e2203ef576987473288f530082512aff850585c61b1f"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f30b0abd723be7e2ffca1272140fac1a2f084c77ec3e123c192b66af1ee9e6c2"
+dependencies = [
+ "autocfg",
 ]
 
 [[package]]
@@ -512,6 +531,15 @@ dependencies = [
  "libc",
  "linux-raw-sys",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "streaming-stats"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc32bf233385fb1ae0c4cf13a8dfd11efec71f6a9de95feac8c870788bc8b25"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

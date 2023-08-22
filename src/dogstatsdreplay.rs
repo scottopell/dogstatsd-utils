@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, str::Lines};
+use std::collections::VecDeque;
 
 use bytes::{Buf, Bytes};
 
@@ -16,6 +16,11 @@ pub mod dogstatsd {
     }
 }
 
+// TODO - what would a more efficient implementation of this look like?
+// I first tried storing the single String and an idx, but this proved
+// to be a bit nastier than I expected.
+// next_line could just return a str, doesn't have to be a String
+// but then everything gets lifetime annotations
 struct CurrentMessage {
     lines: VecDeque<String>,
 }

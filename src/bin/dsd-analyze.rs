@@ -2,6 +2,7 @@ use bytes::Bytes;
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
+use histo::Histogram;
 
 use std::collections::HashMap;
 use std::fs::{self};
@@ -35,18 +36,27 @@ fn main() -> io::Result<()> {
 
     let msg_stats = analyze_msgs(&mut reader)?;
 
-    let total_messages = msg_stats.len();
-    let mut distribution_of_values = HashMap::new();
+    println!("Total messages: {}", msg_stats.len());
+
+    let mut num_value_histogram = Histogram::with_buckets(10);
+    let mut name_length_histogram = Histogram::with_buckets(10);
+    let mut num_tags_histogram = Histogram::with_buckets(10);
+    let mut num_ascii_tags_histogram = Histogram::with_buckets(10);
+    let mut num_unicode_tags_histogram = Histogram::with_buckets(10);
+
     for ds in msg_stats {
-        let entry = distribution_of_values.entry(ds.num_values).or_insert(1);
-        *entry += 1;
+        num_value_histogram.add(ds.num_values as u64);
+        name_length_histogram.add(ds.name_length as u64);
+        num_tags_histogram.add(ds.num_tags as u64);
+        num_ascii_tags_histogram.add(ds.num_ascii_tags as u64);
+        num_unicode_tags_histogram.add(ds.num_unicode_tags as u64);
     }
 
-    println!("Total messages: {}", total_messages);
-    println!("Distribution of count of values:");
-    for (count, occurrences) in distribution_of_values.iter() {
-        println!("  {} values: {} occurrences", count, occurrences);
-    }
+    println!("# values per msg: {}", num_value_histogram);
+    println!("Name length: {}", name_length_histogram);
+    println!("# of Tags: {}", num_tags_histogram);
+    println!("# of ascii Tags: {}", num_ascii_tags_histogram);
+    println!("# of unicode Tags: {}", num_unicode_tags_histogram);
 
     Ok(())
 }
