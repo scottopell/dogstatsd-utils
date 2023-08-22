@@ -4,22 +4,41 @@
 ## Build
 `cargo build --release`
 
-## `replaydump`
-This tool takes in dogstatsd replay files and dumps out the raw dogstatsd
-messages contained. It ignores other metadata such as the timestamps and any OOB
-UDS data.
+## `dsd-cat`
+This tool takes in data either as a dogstatsd v3 replay file or as raw utf-8 encoded text.
+It will print out the contents of the dogstatsd messages either to a file or stdout.
+
+Note for dogstatsd replay files, it ignores the other metadata such as timestamps and OOB data.
 
 ```
-./target/debug/replaydump
-Usage: ./target/debug/replaydump <file_path>
+./target/release/dsd-cat --help
+Take data from the specified input file and write it either to stdout or to a specified file Data can be raw utf-8 text or a dogstatsd-replay file Data can be zstd encoded
+
+Usage: dsd-cat [OPTIONS] --input <INPUT>
+
+Options:
+  -i, --input <INPUT>    File containing dogstatsd replay data
+  -o, --output <OUTPUT>  Where output dogstatsd messages should go
+  -h, --help             Print help
+  -V, --version          Print version
 ```
 
-## `msgstats`
+## `dsd-analyze`
 This tool takes in a stream of text dogstatsd messages either from a file or
-from stdin. It will process them and report out a summary at the end of how many
-messages there were, how many tags they had, how many multi-values they had etc.
+from stdin. These can be zstd encoded, replay files, or utf-8 encoded text.
+Prints out some basic histograms about the messages (metric name length, # of tags, etc)
 
 ```
-cat my-data-file | ./target/debug/stats
+./target/release/dsd-analyze --help
+Analyze DogStatsD traffic messages
+
+Usage: dsd-analyze [INPUT]
+
+Arguments:
+  [INPUT]  File containing dogstatsd data
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 

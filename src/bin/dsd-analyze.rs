@@ -10,11 +10,11 @@ use std::io::Read;
 use std::io::{self};
 use std::path::Path;
 
-/// Process DogStatsD Replay messages
+/// Analyze DogStatsD traffic messages
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// File containing dogstatsd replay data
+    /// File containing dogstatsd data
     input: Option<String>,
 }
 
