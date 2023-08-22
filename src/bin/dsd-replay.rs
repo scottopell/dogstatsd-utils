@@ -6,7 +6,7 @@ use dogstatsd_utils::dogstatsdreplay::DogStatsDReplay;
 
 use clap::Parser;
 
-/// Simple program to greet a person
+/// Process DogStatsD Replay messages
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {

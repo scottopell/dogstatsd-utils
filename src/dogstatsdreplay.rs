@@ -27,6 +27,7 @@ pub struct DogStatsDReplay {
 }
 
 impl DogStatsDReader for DogStatsDReplay {
+    // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
     fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
         if self.buf.remaining() < 4 {
             return Ok(0); // end of stream
