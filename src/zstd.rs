@@ -1,7 +1,3 @@
-use std::io::Cursor;
-
-use byteorder::{BigEndian, LittleEndian, NativeEndian, ReadBytesExt};
-
 // https://github.com/facebook/zstd/blob/3298a08076081dbfa8eba5b08c2167b06020c5ff/doc/zstd_compression_format.md#zstandard-frames
 // 0xFD2FB528 as a little endian u32
 const ZSTD_MAGIC_BYTES: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];

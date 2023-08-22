@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use crate::dogstatsdreader::DogStatsDReader;
 
 pub enum Kind {
@@ -20,8 +22,22 @@ pub struct DogStatsDMessageStats {
     pub kind: Option<Kind>,
 }
 
+pub fn print_msgs<T>(reader: &mut DogStatsDReader, mut out: T)
+where
+    T: Write,
+{
+    let mut line = String::new();
+    while let Ok(num_read) = reader.read_msg(&mut line) {
+        if num_read == 0 {
+            // EOF
+            break;
+        }
+        out.write(line.as_bytes()).unwrap();
+    }
+}
+
 pub fn analyze_msgs(
-    mut reader: Box<dyn DogStatsDReader>,
+    reader: &mut DogStatsDReader,
 ) -> Result<Vec<DogStatsDMessageStats>, std::io::Error> {
     let mut msg_stats: Vec<DogStatsDMessageStats> = Vec::new();
 

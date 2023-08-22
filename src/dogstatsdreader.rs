@@ -1,64 +1,72 @@
-use std::{
-    fs::File,
-    io::{self, BufRead, BufReader},
-    path::Path,
+use std::io::BufRead;
+
+use bytes::{buf::Reader, Buf, Bytes};
+use thiserror::Error;
+
+use crate::{
+    dogstatsdreplay::{check_replay_header, DogStatsDReplay},
+    zstd::is_zstd,
 };
 
-pub trait DogStatsDReader {
-    /// read_msg populates the given String with a dogstastd message
-    fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize>;
+pub trait StringDogStatsDReader {
+    fn read_msg(s: &mut String) -> std::io::Result<usize>;
 }
 
-pub struct BufDogStatsDReader {
-    reader: Box<dyn BufRead>,
+#[derive(Error, Debug)]
+pub enum DogStatsDReaderError {
+    #[error("No dogstatsd replay found")]
+    NotAReplayFile,
 }
 
-impl BufDogStatsDReader {
-    pub fn new(reader: Box<dyn BufRead>) -> Self {
-        BufDogStatsDReader { reader }
-    }
+pub struct DogStatsDReader {
+    // todo this should probably be an enum?
+    replay_reader: Option<DogStatsDReplay>,
+    simple_reader: Option<SimpleDogStatsDReader>,
 }
 
-// TODO refactor this into regular constructor
-impl TryFrom<&Path> for BufDogStatsDReader {
-    type Error = io::Error;
-
-    fn try_from(p: &Path) -> Result<Self, Self::Error> {
-        // Q: why do I not need to declare this file as mutable
-        // and give a mutable reference to BufReader::new?
-        // Is it because I'm transfering ownership?
-        //
-        // Related:
-        // Why can I not do the same thing for
-        //  DogStatsDReplay::TryFrom<File>
-        // ?  I currently have
-        //  DogStatsDReplay::TryFrom<&mut File>
-        // but I don't like this. I read out some bytes from the file in TryFrom
-        // so the file is in a unknown state after.
-        // I'd rather transfer ownership to TryFrom, but I get an error saying
-        // "File must be mutable"
-        // Not sure what I'm missing here.
-
-        let file = File::open(p)?;
-
-        Ok(BufDogStatsDReader {
-            reader: Box::new(BufReader::new(file)),
-        })
-    }
-}
-
-impl DogStatsDReader for BufDogStatsDReader {
-    fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
-        match self.reader.read_line(s) {
-            Ok(n) => {
-                return if n == 0 {
-                    // EOF
-                    Ok(0)
-                } else {
-                    Ok(1)
-                };
-            }
-            Err(e) => Err(e),
+impl DogStatsDReader {
+    pub fn new(mut buf: Bytes) -> DogStatsDReader {
+        let zstd_header = buf.slice(0..4);
+        if is_zstd(&zstd_header) {
+            buf = Bytes::from(zstd::decode_all(buf.reader()).unwrap());
         }
+
+        if let Ok(()) = check_replay_header(&buf.slice(0..8)) {
+            DogStatsDReader {
+                replay_reader: Some(DogStatsDReplay::new(buf)),
+                simple_reader: None,
+            }
+        } else {
+            DogStatsDReader {
+                replay_reader: None,
+                simple_reader: Some(SimpleDogStatsDReader::new(buf)),
+            }
+        }
+    }
+
+    /// read_msg populates the given String with a dogstastd message
+    pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+        if let Some(ref mut replay) = self.replay_reader {
+            replay.read_msg(s)
+        } else if let Some(ref mut simpl) = self.simple_reader {
+            simpl.read_msg(s)
+        } else {
+            panic!("IMPOSSIBLE!");
+        }
+    }
+}
+
+pub struct SimpleDogStatsDReader {
+    reader: Reader<Bytes>,
+}
+
+impl SimpleDogStatsDReader {
+    pub fn new(buf: Bytes) -> Self {
+        let reader = buf.reader();
+        SimpleDogStatsDReader { reader }
+    }
+
+    pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+        self.reader.read_line(s)
     }
 }

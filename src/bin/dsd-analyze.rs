@@ -1,10 +1,12 @@
+use bytes::Bytes;
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
-use dogstatsd_utils::dogstatsdreader::{BufDogStatsDReader, DogStatsDReader};
-use dogstatsd_utils::dogstatsdreplay::DogStatsDReplay;
+use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
+
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::fs::{self};
+use std::io::Read;
+use std::io::{self};
 use std::path::Path;
 
 /// Process DogStatsD Replay messages
@@ -12,32 +14,26 @@ use std::path::Path;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// File containing dogstatsd replay data
-    #[arg(short, long)]
     input: Option<String>,
 }
 
 fn main() -> io::Result<()> {
     let args = Args::parse();
 
-    let reader: Box<dyn DogStatsDReader> = if let Some(input_file) = args.input {
+    let bytes: Bytes = if let Some(input_file) = args.input {
         let file_path = Path::new(&input_file);
-        let mut file = File::open(file_path)?;
 
-        match DogStatsDReplay::try_from(&mut file) {
-            Ok(replay) => Box::new(replay),
-            Err(e) => {
-                println!("Not a replay file, using regular bufreader, e: {}", e);
-                Box::new(BufDogStatsDReader::try_from(file_path).expect("Uh-oh."))
-            }
-        }
+        Bytes::from(fs::read(file_path).unwrap())
     } else {
-        // TODO should be able to support replay byte stream from stdin too
-        Box::new(BufDogStatsDReader::new(Box::new(BufReader::new(
-            io::stdin(),
-        ))))
+        let mut contents = Vec::new();
+        // TODO handle empty stream better probably
+        io::stdin().read_to_end(&mut contents).unwrap();
+        Bytes::from(contents)
     };
 
-    let msg_stats = analyze_msgs(reader)?;
+    let mut reader = DogStatsDReader::new(bytes);
+
+    let msg_stats = analyze_msgs(&mut reader)?;
 
     let total_messages = msg_stats.len();
     let mut distribution_of_values = HashMap::new();

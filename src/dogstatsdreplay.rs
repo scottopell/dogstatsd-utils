@@ -1,20 +1,16 @@
-use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::{Buf, Bytes};
-use std::fmt::write;
-use std::io::{Cursor, Error, Read, Write};
-use std::sync::Arc;
+
+use std::io::Write;
+
 use std::{
     fs::File,
-    io::{self, BufRead},
+    io::{self},
 };
 extern crate zstd;
 
 use prost::Message;
 
-use crate::{
-    dogstatsdreader::DogStatsDReader, dogstatsdreplay::dogstatsd::unix::UnixDogstatsdMsg,
-    zstd::is_zstd,
-};
+use crate::dogstatsdreplay::dogstatsd::unix::UnixDogstatsdMsg;
 
 pub mod dogstatsd {
     pub mod unix {
@@ -24,11 +20,12 @@ pub mod dogstatsd {
 
 pub struct DogStatsDReplay {
     buf: Bytes,
+    current_message: Option<UnixDogstatsdMsg>,
 }
 
-impl DogStatsDReader for DogStatsDReplay {
+impl DogStatsDReplay {
     // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
-    fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+    pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
         if self.buf.remaining() < 4 {
             return Ok(0); // end of stream
         }
@@ -88,7 +85,10 @@ pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
 impl DogStatsDReplay {
     pub fn new(mut buf: Bytes) -> Self {
         buf.advance(8); // eat the header
-        DogStatsDReplay { buf }
+        DogStatsDReplay {
+            buf,
+            current_message: None,
+        }
     }
 
     pub fn read_msgs(&mut self) -> Result<Vec<String>, io::Error> {
@@ -134,33 +134,5 @@ impl DogStatsDReplay {
         }
 
         Ok(())
-    }
-}
-
-// thiserror - crate is useful for defining custom errors easily
-
-impl TryFrom<&mut File> for DogStatsDReplay {
-    type Error = io::Error;
-
-    fn try_from(f: &mut File) -> Result<Self, Self::Error> {
-        let mut buffer = Vec::new();
-        f.read_to_end(&mut buffer)?;
-
-        // Decompress if we find zstd data
-        if is_zstd(&buffer[0..4]) {
-            buffer = zstd::decode_all(Cursor::new(buffer))?;
-        }
-
-        // Are the bytes likely to be a dogstatsd replay file?
-        match check_replay_header(&buffer[0..8]) {
-            Ok(_) => Ok(DogStatsDReplay::new(Bytes::from(buffer))),
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    return Err(e);
-                } else {
-                    panic!("Unexpected error: {}", e);
-                }
-            }
-        }
     }
 }
