@@ -4,7 +4,7 @@ use bytes::{buf::Reader, Buf, Bytes};
 use thiserror::Error;
 
 use crate::{
-    dogstatsdreplay::{check_replay_header, DogStatsDReplay},
+    dogstatsdreplay::{is_replay_header, DogStatsDReplay},
     zstd::is_zstd,
 };
 
@@ -31,7 +31,7 @@ impl DogStatsDReader {
             buf = Bytes::from(zstd::decode_all(buf.reader()).unwrap());
         }
 
-        if let Ok(()) = check_replay_header(&buf.slice(0..8)) {
+        if let Ok(()) = is_replay_header(&buf.slice(0..8)) {
             DogStatsDReader {
                 replay_reader: Some(DogStatsDReplay::new(buf)),
                 simple_reader: None,

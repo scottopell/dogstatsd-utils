@@ -33,6 +33,8 @@ where
             break;
         }
         out.write(line.as_bytes()).unwrap();
+        out.write(b"\n").unwrap();
+        line.clear();
     }
 }
 

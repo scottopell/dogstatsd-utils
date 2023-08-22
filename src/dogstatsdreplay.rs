@@ -1,16 +1,14 @@
+use std::{collections::VecDeque, str::Lines};
+
 use bytes::{Buf, Bytes};
 
-use std::io::Write;
-
-use std::{
-    fs::File,
-    io::{self},
-};
 extern crate zstd;
 
 use prost::Message;
 
 use crate::dogstatsdreplay::dogstatsd::unix::UnixDogstatsdMsg;
+
+const DATADOG_HEADER: [u8; 8] = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
 
 pub mod dogstatsd {
     pub mod unix {
@@ -18,14 +16,32 @@ pub mod dogstatsd {
     }
 }
 
+struct CurrentMessage {
+    lines: VecDeque<String>,
+}
+
+impl CurrentMessage {
+    fn next_line(&mut self) -> Option<String> {
+        self.lines.pop_front()
+    }
+}
+
 pub struct DogStatsDReplay {
     buf: Bytes,
-    current_message: Option<UnixDogstatsdMsg>,
+    current_message: Option<CurrentMessage>,
 }
 
 impl DogStatsDReplay {
     // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+        if let Some(ref mut current) = self.current_message {
+            if let Some(line) = current.next_line() {
+                s.insert_str(0, &line);
+                return Ok(1);
+            } else {
+                self.current_message = None;
+            }
+        }
         if self.buf.remaining() < 4 {
             return Ok(0); // end of stream
         }
@@ -44,23 +60,41 @@ impl DogStatsDReplay {
         let message = UnixDogstatsdMsg::decode(msg_buf)?;
         match std::str::from_utf8(&message.payload) {
             Ok(v) => {
-                s.insert_str(0, v);
+                if v.len() == 0 {
+                    return Ok(0); // end of stream
+                }
+
+                let lines: Vec<String> = v.lines().map(|l| l.to_owned()).collect();
+                let mut msg = CurrentMessage {
+                    lines: VecDeque::from(lines),
+                };
+                let line = msg.next_line().expect("Found no next line, why not?? ");
+
+                s.insert_str(0, &line);
+                self.current_message = Some(msg);
+
                 Ok(1)
             }
             Err(e) => panic!("Invalid utf-8 sequence: {}", e),
         }
     }
+
+    pub fn new(mut buf: Bytes) -> Self {
+        buf.advance(8); // eat the header
+        DogStatsDReplay {
+            buf,
+            current_message: None,
+        }
+    }
 }
 
-pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
+pub fn is_replay_header(header: &[u8]) -> std::io::Result<()> {
     if header.len() <= 4 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "Not enough bytes to determine if its a replay file",
         ));
     }
-    // todo constify this
-    let datadog_header = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
 
     // f0 is bitwise or'd with the file version, so to get the file version, lets do a bitwise xor
     let version = header[4] ^ 0xF0;
@@ -72,7 +106,7 @@ pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
         ));
     }
 
-    if header[0..4] != datadog_header[0..4] {
+    if header[0..4] != DATADOG_HEADER[0..4] {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("Did not find replay header. Found: {:X?}", header),
@@ -80,59 +114,4 @@ pub fn check_replay_header(header: &[u8]) -> std::io::Result<()> {
     }
 
     return Ok(());
-}
-
-impl DogStatsDReplay {
-    pub fn new(mut buf: Bytes) -> Self {
-        buf.advance(8); // eat the header
-        DogStatsDReplay {
-            buf,
-            current_message: None,
-        }
-    }
-
-    pub fn read_msgs(&mut self) -> Result<Vec<String>, io::Error> {
-        let mut msgs = Vec::new();
-
-        let mut s = String::new();
-        while let Ok(num_read) = self.read_msg(&mut s) {
-            if num_read <= 0 {
-                break;
-            }
-            msgs.push(s.clone());
-            s.clear();
-        }
-
-        Ok(msgs)
-    }
-
-    pub fn print_msgs(&mut self) {
-        let mut s = String::new();
-        loop {
-            match self.read_msg(&mut s) {
-                Ok(num_read) => {
-                    if num_read <= 0 {
-                        break;
-                    }
-                    println!("{}", s);
-                    s.clear();
-                }
-                Err(e) => eprintln!("Error while reading a message!, {}", e),
-            }
-        }
-    }
-
-    pub fn write_to(&mut self, out_path: &str) -> Result<(), io::Error> {
-        let mut output_file = File::create(out_path.to_owned())?;
-
-        let mut s = String::new();
-        while let Ok(num_read) = self.read_msg(&mut s) {
-            if num_read <= 0 {
-                break;
-            }
-            output_file.write_all(s.as_bytes())?;
-        }
-
-        Ok(())
-    }
 }
