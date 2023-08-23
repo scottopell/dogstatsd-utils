@@ -16,11 +16,6 @@ pub mod dogstatsd {
     }
 }
 
-// TODO - what would a more efficient implementation of this look like?
-// I first tried storing the single String and an idx, but this proved
-// to be a bit nastier than I expected.
-// next_line could just return a str, doesn't have to be a String
-// but then everything gets lifetime annotations
 struct CurrentMessage {
     lines: VecDeque<String>,
 }
@@ -69,10 +64,11 @@ impl DogStatsDReplay {
                     return Ok(0); // end of stream
                 }
 
-                let lines: Vec<String> = v.lines().map(|l| l.to_owned()).collect();
-                let mut msg = CurrentMessage {
-                    lines: VecDeque::from(lines),
-                };
+                let mut lines: VecDeque<String> = VecDeque::new();
+                for line in v.lines() {
+                    lines.push_back(String::from(line));
+                }
+                let mut msg = CurrentMessage { lines };
                 let line = msg.next_line().expect("Found no next line, why not?? ");
 
                 s.insert_str(0, &line);
