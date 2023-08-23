@@ -16,32 +16,19 @@ pub mod dogstatsd {
     }
 }
 
-struct CurrentMessage {
-    lines: VecDeque<String>,
-}
-
-impl CurrentMessage {
-    fn next_line(&mut self) -> Option<String> {
-        self.lines.pop_front()
-    }
-}
-
 pub struct DogStatsDReplay {
     buf: Bytes,
-    current_message: Option<CurrentMessage>,
+    current_messages: VecDeque<String>,
 }
 
 impl DogStatsDReplay {
     // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
-        if let Some(ref mut current) = self.current_message {
-            if let Some(line) = current.next_line() {
-                s.insert_str(0, &line);
-                return Ok(1);
-            } else {
-                self.current_message = None;
-            }
+        if let Some(line) = self.current_messages.pop_front() {
+            s.insert_str(0, &line);
+            return Ok(1);
         }
+
         if self.buf.remaining() < 4 {
             return Ok(0); // end of stream
         }
@@ -64,16 +51,18 @@ impl DogStatsDReplay {
                     return Ok(0); // end of stream
                 }
 
-                let mut lines: VecDeque<String> = VecDeque::new();
+                // should already be empty
+                self.current_messages.clear();
                 for line in v.lines() {
-                    lines.push_back(String::from(line));
+                    self.current_messages.push_back(String::from(line));
                 }
-                let mut msg = CurrentMessage { lines };
-                let line = msg.next_line().expect("Found no next line, why not?? ");
+
+                let line = self
+                    .current_messages
+                    .pop_front()
+                    .expect("Found no next line, why not?? ");
 
                 s.insert_str(0, &line);
-                self.current_message = Some(msg);
-
                 Ok(1)
             }
             Err(e) => panic!("Invalid utf-8 sequence: {}", e),
@@ -82,9 +71,10 @@ impl DogStatsDReplay {
 
     pub fn new(mut buf: Bytes) -> Self {
         buf.advance(8); // eat the header
+
         DogStatsDReplay {
             buf,
-            current_message: None,
+            current_messages: VecDeque::new(),
         }
     }
 }
