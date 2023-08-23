@@ -19,6 +19,13 @@ histo = "1.0.0"
 [build-dependencies]
 prost-build = "0.11.9"
 
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "my_benchmark"
+harness = false
+
 [profile.release-with-debug]
 inherits = "release"
 debug = true
