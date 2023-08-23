@@ -29,9 +29,9 @@ impl DogStatsDReplay {
             Some(mut end_idx) => {
                 // Save current start of line
                 let start_idx = self.current_messages_start_idx;
-                // Set next start of line to be one after the newline char
                 end_idx += start_idx;
-                self.current_messages_start_idx = end_idx + 2;
+                // Set next start of line to be one after the newline char
+                self.current_messages_start_idx = end_idx + 1;
                 Some(&self.current_messages[start_idx..end_idx])
             }
             None => None,
