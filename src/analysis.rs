@@ -64,6 +64,8 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         num_unicode_tags: Histogram::with_buckets(default_num_buckets),
         kind: HashMap::new(),
     };
+    // TODO add num_contexts to this, requires some more computation to
+    // separate the tags and put it in a hashset probably
 
     msg_stats.kind.insert(Kind::Count, 0);
     msg_stats.kind.insert(Kind::Distribution, 0);
