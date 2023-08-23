@@ -1,7 +1,10 @@
-use std::io::Write;
+use std::{collections::HashMap, fmt::Display, io::Write};
+
+use histo::Histogram;
 
 use crate::dogstatsdreader::DogStatsDReader;
 
+#[derive(Hash, PartialEq, Eq)]
 pub enum Kind {
     Count,
     Distribution,
@@ -13,13 +16,27 @@ pub enum Kind {
     Event,
 }
 
-pub struct DogStatsDMessageStats {
-    pub name_length: u16,
-    pub num_values: u16,
-    pub num_tags: u16,
-    pub num_ascii_tags: u16,
-    pub num_unicode_tags: u16,
-    pub kind: Option<Kind>,
+impl Display for Kind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Kind::Count => write!(f, "Count"),
+            Kind::Distribution => write!(f, "Distribution"),
+            Kind::Gauge => write!(f, "Gauge"),
+            Kind::Timer => write!(f, "Timer"),
+            Kind::Histogram => write!(f, "Histogram"),
+            Kind::Set => write!(f, "Set"),
+            Kind::ServiceCheck => write!(f, "ServiceCheck"),
+            Kind::Event => write!(f, "Event"),
+        }
+    }
+}
+
+pub struct DogStatsDBatchStats {
+    pub name_length: Histogram,
+    pub num_values: Histogram,
+    pub num_tags: Histogram,
+    pub num_unicode_tags: Histogram,
+    pub kind: HashMap<Kind, u16>,
 }
 
 pub fn print_msgs<T>(reader: &mut DogStatsDReader, mut out: T)
@@ -38,10 +55,23 @@ where
     }
 }
 
-pub fn analyze_msgs(
-    reader: &mut DogStatsDReader,
-) -> Result<Vec<DogStatsDMessageStats>, std::io::Error> {
-    let mut msg_stats: Vec<DogStatsDMessageStats> = Vec::new();
+pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats, std::io::Error> {
+    let default_num_buckets = 10;
+    let mut msg_stats = DogStatsDBatchStats {
+        name_length: Histogram::with_buckets(default_num_buckets),
+        num_values: Histogram::with_buckets(default_num_buckets),
+        num_tags: Histogram::with_buckets(default_num_buckets),
+        num_unicode_tags: Histogram::with_buckets(default_num_buckets),
+        kind: HashMap::new(),
+    };
+
+    msg_stats.kind.insert(Kind::Count, 0);
+    msg_stats.kind.insert(Kind::Distribution, 0);
+    msg_stats.kind.insert(Kind::Event, 0);
+    msg_stats.kind.insert(Kind::Gauge, 0);
+    msg_stats.kind.insert(Kind::Histogram, 0);
+    msg_stats.kind.insert(Kind::ServiceCheck, 0);
+    msg_stats.kind.insert(Kind::Set, 0);
 
     let mut line = String::new();
     while let Ok(num_read) = reader.read_msg(&mut line) {
@@ -51,61 +81,73 @@ pub fn analyze_msgs(
         }
         let parts: Vec<&str> = line.split('|').collect();
         let name_and_values: Vec<&str> = parts[0].split(':').collect();
+        let num_values = name_and_values.len() as u64 - 1;
 
         let name = name_and_values[0];
 
         let last_part = parts[parts.len() - 1];
         let mut num_tags = 0;
-        let mut num_ascii_tags = 0;
         let mut num_unicode_tags = 0;
         if last_part.starts_with("#") {
             // these are tags
             let tags = last_part.split(',');
             for tag in tags {
                 num_tags += 1;
-                if tag.is_ascii() {
-                    num_ascii_tags += 1;
-                } else {
+                if !tag.is_ascii() {
                     num_unicode_tags += 1;
                 }
             }
         }
 
-        let kind = match parts.get(1) {
+        msg_stats.name_length.add(name.len() as u64);
+        msg_stats.num_tags.add(num_tags);
+        msg_stats.num_unicode_tags.add(num_unicode_tags);
+        msg_stats.num_values.add(num_values);
+
+        match parts.get(1) {
             Some(s) => match *s {
-                "d" => Some(Kind::Distribution),
-                "ms" => Some(Kind::Timer),
-                "g" => Some(Kind::Gauge),
-                "c" => Some(Kind::Count),
-                "s" => Some(Kind::Set),
-                "h" => Some(Kind::Histogram),
+                "d" => {
+                    msg_stats
+                        .kind
+                        .entry(Kind::Distribution)
+                        .and_modify(|v| *v += 1);
+                }
+                "ms" => {
+                    msg_stats.kind.entry(Kind::Timer).and_modify(|v| *v += 1);
+                }
+                "g" => {
+                    msg_stats.kind.entry(Kind::Gauge).and_modify(|v| *v += 1);
+                }
+                "c" => {
+                    msg_stats.kind.entry(Kind::Count).and_modify(|v| *v += 1);
+                }
+                "s" => {
+                    msg_stats.kind.entry(Kind::Set).and_modify(|v| *v += 1);
+                }
+                "h" => {
+                    msg_stats
+                        .kind
+                        .entry(Kind::Histogram)
+                        .and_modify(|v| *v += 1);
+                }
                 _ => {
                     if line.starts_with("_sc") {
-                        Some(Kind::ServiceCheck)
+                        msg_stats
+                            .kind
+                            .entry(Kind::ServiceCheck)
+                            .and_modify(|v| *v += 1);
                     } else if line.starts_with("_e") {
-                        Some(Kind::Event)
+                        msg_stats.kind.entry(Kind::Event).and_modify(|v| *v += 1);
                     } else {
                         println!("Found unknown msg type for dogstatsd msg: {}", line);
-                        None
                     }
                 }
             },
             _ => {
                 println!("Found unusual dogstatsd msg: '{}'", line);
-                None
             }
         };
 
-        let ds = DogStatsDMessageStats {
-            name_length: name.len() as u16,
-            num_values: name_and_values.len() as u16 - 1,
-            num_tags,
-            num_ascii_tags,
-            num_unicode_tags,
-            kind,
-        };
-
-        msg_stats.push(ds);
         line.clear();
     }
 
