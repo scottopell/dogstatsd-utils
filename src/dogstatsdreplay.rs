@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use bytes::{Buf, Bytes};
 
 extern crate zstd;
@@ -18,14 +16,31 @@ pub mod dogstatsd {
 
 pub struct DogStatsDReplay {
     buf: Bytes,
-    current_messages: VecDeque<String>,
+    current_messages: String,
+    current_messages_start_idx: usize,
 }
 
 impl DogStatsDReplay {
-    // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
+    pub fn next_line_in_current_messages(&mut self) -> Option<&str> {
+        if self.current_messages_start_idx >= self.current_messages.len() {
+            return None;
+        }
+        match self.current_messages[self.current_messages_start_idx..].find("\n") {
+            Some(mut end_idx) => {
+                // Save current start of line
+                let start_idx = self.current_messages_start_idx;
+                end_idx += start_idx;
+                // Set next start of line to be one after the newline char
+                self.current_messages_start_idx = end_idx + 1;
+                Some(&self.current_messages[start_idx..end_idx])
+            }
+            None => None,
+        }
+    }
+
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
-        if let Some(line) = self.current_messages.pop_front() {
-            s.insert_str(0, &line);
+        if let Some(line) = self.next_line_in_current_messages() {
+            s.insert_str(0, line);
             return Ok(1);
         }
 
@@ -53,13 +68,11 @@ impl DogStatsDReplay {
 
                 // should already be empty
                 self.current_messages.clear();
-                for line in v.lines() {
-                    self.current_messages.push_back(String::from(line));
-                }
+                self.current_messages_start_idx = 0;
+                self.current_messages.insert_str(0, v);
 
                 let line = self
-                    .current_messages
-                    .pop_front()
+                    .next_line_in_current_messages()
                     .expect("Found no next line, why not?? ");
 
                 s.insert_str(0, &line);
@@ -74,7 +87,8 @@ impl DogStatsDReplay {
 
         DogStatsDReplay {
             buf,
-            current_messages: VecDeque::new(),
+            current_messages: String::new(),
+            current_messages_start_idx: 0,
         }
     }
 }
