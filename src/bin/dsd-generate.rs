@@ -38,7 +38,7 @@ fn main() -> Result<(), DSDGenerateError> {
         let mut rng = SmallRng::seed_from_u64(34512223);
         let dd = dogstatsd::DogStatsD::default(&mut rng);
         for _ in 0..num_msgs {
-            println!("{}", dd.generate(rng));
+            println!("{}", dd.generate(&mut rng));
         }
     } else {
         todo!("Rate not implemented yet.");
