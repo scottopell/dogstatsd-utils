@@ -15,8 +15,11 @@ indicatif = "0.16.0"
 clap = { version = "4.3.23", features = ["derive"] }
 thiserror = "1.0"
 histo = "1.0.0"
-lading-payload = { git = "https://github.com/DataDog/lading.git", branch = "main", features = ["dogstatsd_perf"] }
+lading-payload = { git = "https://github.com/DataDog/lading.git", branch = "sopell/default-valueconf", features = ["dogstatsd_perf"] }
+lading-throttle = { git = "https://github.com/DataDog/lading.git", branch = "main" }
 rand = { default-features = false, features = ["small_rng", "std", "std_rng" ]}
+tokio = { version = "1.32", features = ["time"] }
+byte-unit = "4.0"
 
 
 [build-dependencies]
