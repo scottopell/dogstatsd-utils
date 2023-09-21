@@ -1,12 +1,13 @@
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, time::Duration};
 
-use byte_unit::Byte;
+use dogstatsd_utils::rate::{parse_rate, RateSpecification};
 use lading_throttle::Throttle;
 use rand::{rngs::SmallRng, SeedableRng};
 use thiserror::Error;
 
 use clap::Parser;
 use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
+use tokio::time::sleep;
 
 /// Generate random dogstatsd messages and emit them to stdout line-by-line
 /// if num-msgs is specified, exactly that count of messages will be emitted
@@ -18,7 +19,8 @@ struct Args {
     #[arg(short, long)]
     num_msgs: Option<u16>,
 
-    /// Emit at this rate forever
+    /// Rate can be specified as throughput (ie, bytes per second) or time (ie 1hz)
+    /// eg '1kb' or '10 hz'
     #[arg(short, long)]
     rate: Option<String>,
 
@@ -60,18 +62,29 @@ async fn main() -> Result<(), DSDGenerateError> {
             println!("{}", dd.generate(&mut rng));
         }
     } else if let Some(rate) = args.rate {
-        let bytes_per_second = Byte::from_str(rate).unwrap().get_bytes() as u32;
-        let mut throttle = Throttle::new_with_config(
-            lading_throttle::Config::default(),
-            NonZeroU32::new(bytes_per_second).unwrap(),
-        );
-        loop {
-            let msg = dd.generate(&mut rng);
-            let msg_str = msg.to_string();
-            let _ = throttle
-                .wait_for(NonZeroU32::new(msg_str.len() as u32).unwrap())
-                .await;
-            println!("{}", msg_str);
+        match parse_rate(&rate) {
+            Some(RateSpecification::TimerBased(hz_value)) => loop {
+                let sleep_in_ms = 1000 / (hz_value as u64);
+                sleep(Duration::from_millis(sleep_in_ms)).await;
+                println!("{}", dd.generate(&mut rng));
+            },
+            Some(RateSpecification::ThroughputBased(bytes_per_second)) => {
+                let mut throttle = Throttle::new_with_config(
+                    lading_throttle::Config::default(),
+                    NonZeroU32::new(bytes_per_second).unwrap(),
+                );
+                loop {
+                    let msg = dd.generate(&mut rng);
+                    let msg_str = msg.to_string();
+                    let _ = throttle
+                        .wait_for(NonZeroU32::new(msg_str.len() as u32).unwrap())
+                        .await;
+                    println!("{}", msg_str);
+                }
+            }
+            None => {
+                println!("Invalid rate specified, couldn't parse '{}'", rate);
+            }
         }
     } else {
         println!("{}", dd.generate(&mut rng));
