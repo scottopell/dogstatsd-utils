@@ -9,9 +9,8 @@ use clap::Parser;
 use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
 use tokio::time::sleep;
 
-/// Generate random dogstatsd messages and emit them to stdout line-by-line
-/// if num-msgs is specified, exactly that count of messages will be emitted
-/// and then the program will exit. Otherwise it will run forever at --rate.
+/// Generate random dogstatsd messages and emit them to stdout line-by-line.
+/// If no options are specified, then it will emit a single message and exit.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
