@@ -39,17 +39,14 @@ mod tests {
         let mut s = String::new();
 
         // When reader is read
-        let num_read = reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        let num_read = reader.read_msg(&mut s).unwrap();
         // Expect one msg
         assert_eq!(s.as_str(), "my.metric:1|g");
         assert_eq!(num_read, 1);
         s.clear();
 
         // then no more
-        assert_eq!(
-            reader.read_msg(&mut s).expect("no error on empty string"),
-            0
-        );
+        assert_eq!(reader.read_msg(&mut s).unwrap(), 0);
     }
 
     #[test]
@@ -60,13 +57,13 @@ mod tests {
         let mut s = String::new();
 
         // When reader is read
-        let num_read = reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        let num_read = reader.read_msg(&mut s).unwrap();
         // Expect one msg
         assert_eq!(s.as_str(), "my.metric:1|g");
         assert_eq!(num_read, 1);
         s.clear();
 
-        let num_read = reader.read_msg(&mut s).expect("no error on empty string");
+        let num_read = reader.read_msg(&mut s).unwrap();
         // then no more
         assert_eq!(num_read, 0);
     }
@@ -79,17 +76,14 @@ mod tests {
         let mut s = String::new();
 
         // When read
-        let num_read = reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        let num_read = reader.read_msg(&mut s).unwrap();
         // Expect one msg
         assert_eq!(s.as_str(), "my.metric:1|g");
         assert_eq!(num_read, 1);
         s.clear();
 
         // then no more
-        assert_eq!(
-            reader.read_msg(&mut s).expect("no error on empty string"),
-            0
-        );
+        assert_eq!(reader.read_msg(&mut s).unwrap(), 0);
     }
 
     #[test]
@@ -100,22 +94,19 @@ mod tests {
         let mut s = String::new();
 
         // When read, expect msg 1
-        let num_read = reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        let num_read = reader.read_msg(&mut s).unwrap();
         assert_eq!(s.as_str(), "my.metric:1|g");
         assert_eq!(num_read, 1);
 
         s.clear();
 
         // and msg 2
-        reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        reader.read_msg(&mut s).unwrap();
         assert_eq!(s.as_str(), "my.metric:2|g");
         s.clear();
 
         // then no more
-        assert_eq!(
-            reader.read_msg(&mut s).expect("no error on empty string"),
-            0
-        );
+        assert_eq!(reader.read_msg(&mut s).unwrap(), 0);
     }
 
     #[test]
@@ -126,21 +117,18 @@ mod tests {
         let mut s = String::new();
 
         // When read, expect msg 1
-        let num_read = reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        let num_read = reader.read_msg(&mut s).unwrap();
         assert_eq!(s.as_str(), "my.metric:1|g");
         assert_eq!(num_read, 1);
         s.clear();
 
         // and msg 2
-        reader.read_msg(&mut s).expect("Unexpected no more msgs");
+        reader.read_msg(&mut s).unwrap();
         assert_eq!(s.as_str(), "my.metric:2|g");
         s.clear();
 
         // then no more
-        assert_eq!(
-            reader.read_msg(&mut s).expect("no error on empty string"),
-            0
-        );
+        assert_eq!(reader.read_msg(&mut s).unwrap(), 0);
     }
 
     #[test]
