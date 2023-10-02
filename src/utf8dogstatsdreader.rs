@@ -1,5 +1,4 @@
 use bytes::{buf::Reader, Buf, Bytes};
-use char;
 use std::io::BufRead;
 pub struct Utf8DogStatsDReader {
     reader: Reader<Bytes>,

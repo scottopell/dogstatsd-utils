@@ -2,7 +2,7 @@ use bytes::{Buf, Bytes};
 use thiserror::Error;
 
 use crate::{
-    dogstatsdreplay::{is_replay_header, DogStatsDReplay},
+    dogstatsdreplayreader::{is_replay_header, DogStatsDReplayReader},
     utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
@@ -22,7 +22,7 @@ pub enum DogStatsDReader {
 
 pub struct DogStatsDReader {
     // todo this should probably be an enum?
-    replay_reader: Option<DogStatsDReplay>,
+    replay_reader: Option<DogStatsDReplayReader>,
     utf8_reader: Option<Utf8DogStatsDReader>,
 }
 
@@ -39,7 +39,7 @@ impl DogStatsDReader {
 
         if let Ok(()) = is_replay_header(&buf.slice(0..8)) {
             DogStatsDReader {
-                replay_reader: Some(DogStatsDReplay::new(buf)),
+                replay_reader: Some(DogStatsDReplayReader::new(buf)),
                 utf8_reader: None,
             }
         } else {
@@ -67,7 +67,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reader_single_msg() {
+    fn utf8_single_msg() {
         // Given 1 msg
         let payload = b"my.metric:1|g";
         let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
@@ -88,7 +88,7 @@ mod tests {
     }
 
     #[test]
-    fn reader_single_msg_trailing_newline() {
+    fn utf8_single_msg_trailing_newline() {
         // Given one msg with newline
         let payload = b"my.metric:1|g\n";
         let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn reader_multi_msg_msg() {
+    fn utf8_multi_msg() {
         // Given 2 msgs
         let payload = b"my.metric:1|g\nmy.metric:2|g";
         let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn reader_multi_msg_msg_trailing_newline() {
+    fn utf8_multi_msg_msg_trailing_newline() {
         // Given 2 msgs with a trailing newline
         let payload = b"my.metric:1|g\nmy.metric:2|g\n";
         let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn reader_example() {
+    fn utf8_example() {
         // Given 2 msgs with a trailing newline
         let payload = b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
         let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn zstd_generic_reader_single_msg() {
+    fn zstd_utf8_reader_single_msg() {
         // Given 1 msg without newline that is zstd compressed
         let payload = &[
             0x28, 0xb5, 0x2f, 0xfd, 0x04, 0x58, 0x69, 0x00, 0x00, 0x6d, 0x79, 0x2e, 0x6d, 0x65,
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn zstd_generic_reader_single_msg_trailing_newline() {
+    fn zstd_utf8_single_msg_trailing_newline() {
         // Given 1 msg with newline that is zstd compressed
         let payload = &[
             0x28, 0xb5, 0x2f, 0xfd, 0x04, 0x58, 0x71, 0x00, 0x00, 0x6d, 0x79, 0x2e, 0x6d, 0x65,
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn zstd_reader_four_msg_trailing_newline() {
+    fn zstd_utf8_four_msg_trailing_newline() {
         // Given 4 msgs with newline that is zstd compressed
         let payload = &[
             0x28, 0xb5, 0x2f, 0xfd, 0x04, 0x58, 0x6d, 0x02, 0x00, 0xe4, 0x03, 0x6d, 0x79, 0x2e,

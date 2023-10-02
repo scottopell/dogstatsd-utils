@@ -6,7 +6,7 @@ extern crate zstd;
 
 use prost::Message;
 
-use crate::dogstatsdreplay::dogstatsd::unix::UnixDogstatsdMsg;
+use crate::dogstatsdreplayreader::dogstatsd::unix::UnixDogstatsdMsg;
 
 const DATADOG_HEADER: [u8; 8] = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
 
@@ -16,12 +16,12 @@ pub mod dogstatsd {
     }
 }
 
-pub struct DogStatsDReplay {
+pub struct DogStatsDReplayReader {
     buf: Bytes,
     current_messages: VecDeque<String>,
 }
 
-impl DogStatsDReplay {
+impl DogStatsDReplayReader {
     // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
         if let Some(line) = self.current_messages.pop_front() {
@@ -72,7 +72,7 @@ impl DogStatsDReplay {
     pub fn new(mut buf: Bytes) -> Self {
         buf.advance(8); // eat the header
 
-        DogStatsDReplay {
+        DogStatsDReplayReader {
             buf,
             current_messages: VecDeque::new(),
         }
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn two_msg_two_lines() {
-        let mut replay = DogStatsDReplay::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH));
+        let mut replay = DogStatsDReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH));
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn one_msg_two_lines() {
-        let mut replay = DogStatsDReplay::new(Bytes::from(ONE_MSG_TWO_LINES));
+        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_TWO_LINES));
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn one_msg_three_lines() {
-        let mut replay = DogStatsDReplay::new(Bytes::from(ONE_MSG_THREE_LINES));
+        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_THREE_LINES));
         let mut s = String::new();
 
         let res = replay.read_msg(&mut s).unwrap();
