@@ -2,8 +2,6 @@ use std::collections::VecDeque;
 
 use bytes::{Buf, Bytes};
 
-extern crate zstd;
-
 use prost::Message;
 
 use crate::dogstatsdreplayreader::dogstatsd::unix::UnixDogstatsdMsg;
