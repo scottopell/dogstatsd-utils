@@ -3,25 +3,48 @@ use prost::Message;
 
 use crate::dogstatsdreplayreader::dogstatsd::unix::UnixDogstatsdMsg;
 
-const DATADOG_HEADER: [u8; 8] = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
+const DATADOG_HEADER: &[u8] = &[0xD4, 0x74, 0xD0, 0x60];
+use thiserror::Error;
 
 pub mod dogstatsd {
     pub mod unix {
         include!(concat!(env!("OUT_DIR"), "/dogstatsd.unix.rs"));
     }
 }
+
+// TODO currently missing ability to read tagger state from replay file
+// If this is desired, the length can be found as the last 4 bytes of the replay file
+// Only present in version 2 or greater
+#[derive(Debug)]
 pub struct ReplayReader {
     buf: Bytes,
+    read_all_unixdogstatsdmsg: bool,
+}
+
+#[derive(Error, Debug, PartialEq)]
+pub enum ReplayReaderError {
+    #[error("No dogstatsd replay marker found")]
+    NotAReplayFile,
+    #[error("Unsupported replay version")]
+    UnsupportedReplayVersion,
 }
 
 impl ReplayReader {
+    /// read_msg will return the next UnixDogstatsdMsg if it exists
     pub fn read_msg(&mut self) -> Option<UnixDogstatsdMsg> {
-        if self.buf.remaining() < 4 {
+        if self.buf.remaining() < 4 || self.read_all_unixdogstatsdmsg {
             return None;
         }
 
         // Read the little endian uint32 that gives the length of the next protobuf message
         let message_length = self.buf.get_u32_le() as usize;
+
+        if message_length == 0 {
+            // This indicates a record separator between UnixDogStatsdMsg list
+            // and the tagger state. Next bytes are all for tagger state.
+            self.read_all_unixdogstatsdmsg = true;
+            return None;
+        }
 
         if self.buf.remaining() < message_length {
             // end of stream
@@ -44,12 +67,25 @@ impl ReplayReader {
         }
     }
 
-    pub fn new(mut buf: Bytes) -> Self {
-        // TODO test if its a replay file and return Err if it is.
+    pub fn new(mut buf: Bytes) -> Result<Self, ReplayReaderError> {
+        let header = buf.copy_to_bytes(4);
+        if header != DATADOG_HEADER {
+            return Err(ReplayReaderError::NotAReplayFile);
+        }
+        // Next byte describes the replay version
+        // f0 is bitwise or'd with the file version, so to get the file version, do a bitwise xor
+        let version = buf.get_u8() ^ 0xF0;
 
-        buf.advance(8); // eat the header
+        if version != 3 {
+            return Err(ReplayReaderError::UnsupportedReplayVersion);
+        }
+        // Consume the next 3 bytes, the rest of the file header
+        buf.advance(3);
 
-        Self { buf }
+        Ok(Self {
+            buf,
+            read_all_unixdogstatsdmsg: false,
+        })
     }
 }
 
@@ -85,7 +121,7 @@ mod tests {
 
     #[test]
     fn two_msg_two_lines() {
-        let mut replay = ReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH));
+        let mut replay = ReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH)).unwrap();
         let msg = replay.read_msg().unwrap();
         let mut expected_msg = UnixDogstatsdMsg::default();
         let expected_payload: &[u8] = &[
@@ -128,12 +164,18 @@ mod tests {
         expected_msg.ancillary_size = 0;
         assert_eq!(expected_msg, msg);
 
-        // TODO this is a BUG
-        // I believe we're incorrectly _not_ detecting the end of the replay file
-        // There is tagger state at the end of a capture file
-        // I just haven't cared about it yet, but its worth parsing out
-        assert_eq!(Some(UnixDogstatsdMsg::default()), replay.read_msg());
-        assert_eq!(Some(UnixDogstatsdMsg::default()), replay.read_msg());
         assert_eq!(None, replay.read_msg())
+    }
+
+    #[test]
+    fn invalid_replay_bytes() {
+        let replay = ReplayReader::new(Bytes::from_static(b"my.metric:1|g\n"));
+        assert_eq!(replay.unwrap_err(), ReplayReaderError::NotAReplayFile);
+
+        let replay = ReplayReader::new(Bytes::from_static(b"abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(replay.unwrap_err(), ReplayReaderError::NotAReplayFile);
+
+        let replay = ReplayReader::new(Bytes::from_static(b"\n\n\n\n\n\n\n\n\n\n\n\t\t\t\n\t\n"));
+        assert_eq!(replay.unwrap_err(), ReplayReaderError::NotAReplayFile);
     }
 }
