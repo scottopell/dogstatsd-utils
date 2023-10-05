@@ -4,6 +4,8 @@ use histo::Histogram;
 
 use crate::dogstatsdreader::DogStatsDReader;
 
+const DEFAULT_NUM_BUCKETS: u64 = 10;
+
 #[derive(Hash, PartialEq, Eq)]
 pub enum Kind {
     Count,
@@ -37,6 +39,7 @@ pub struct DogStatsDBatchStats {
     pub num_tags: Histogram,
     pub num_unicode_tags: Histogram,
     pub kind: HashMap<Kind, u16>,
+    pub num_contexts: u32,
 }
 
 pub fn print_msgs<T>(reader: &mut DogStatsDReader, mut out: T)
@@ -56,16 +59,15 @@ where
 }
 
 pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats, std::io::Error> {
-    let default_num_buckets = 10;
+    let default_num_buckets = DEFAULT_NUM_BUCKETS;
     let mut msg_stats = DogStatsDBatchStats {
         name_length: Histogram::with_buckets(default_num_buckets),
         num_values: Histogram::with_buckets(default_num_buckets),
         num_tags: Histogram::with_buckets(default_num_buckets),
         num_unicode_tags: Histogram::with_buckets(default_num_buckets),
         kind: HashMap::new(),
+        num_contexts: 0,
     };
-    // TODO add num_contexts to this, requires some more computation to
-    // separate the tags and put it in a hashset probably
 
     msg_stats.kind.insert(Kind::Count, 0);
     msg_stats.kind.insert(Kind::Distribution, 0);
@@ -154,4 +156,21 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
     }
 
     Ok(msg_stats)
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use super::*;
+
+    #[test]
+    fn two_msg_two_lines() {
+        let payload = b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
+        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let res = analyze_msgs(&mut reader).unwrap();
+
+        // TODO not implemented yet
+        // assert_eq!(res.num_contexts, 3);
+    }
 }

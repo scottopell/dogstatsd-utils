@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod dogstatsdmsg;
 pub mod dogstatsdreader;
 pub mod dogstatsdreplayreader;
 pub mod rate;
