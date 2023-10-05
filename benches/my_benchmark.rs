@@ -2,8 +2,11 @@
 
 use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use dogstatsd_utils::dogstatsdreplayreader::DogStatsDReplayReader;
+use dogstatsd_utils::{
+    dogstatsdreplayreader::DogStatsDReplayReader, utf8dogstatsdreader::Utf8DogStatsDReader,
+};
 
+const FOUR_MSG_FOUR_LINES_UTF8: &[u8] = b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
 const ONE_MSG_THREE_LINES: &[u8] = &[
     0xd4, 0x74, 0xd0, 0x60, 0xf3, 0xff, 0x00, 0x00, 0xa9, 0x00, 0x00, 0x00, 0x08, 0xa7, 0xe3, 0x97,
     0xff, 0xaf, 0xbb, 0x88, 0xbf, 0x17, 0x10, 0x99, 0x01, 0x1a, 0x99, 0x01, 0x73, 0x74, 0x61, 0x74,
@@ -171,6 +174,17 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
             for _ in 0..3 {
                 replay.read_msg(&mut s).unwrap();
+                s.clear();
+            }
+        })
+    });
+    c.bench_function("utf8 parsing -- four msgs and four lines", |b| {
+        b.iter(|| {
+            let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(FOUR_MSG_FOUR_LINES_UTF8));
+            let mut s = String::new();
+
+            for _ in 0..3 {
+                reader.read_msg(&mut s).unwrap();
                 s.clear();
             }
         })
