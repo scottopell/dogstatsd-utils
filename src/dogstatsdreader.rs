@@ -2,8 +2,7 @@ use bytes::{Buf, Bytes};
 use thiserror::Error;
 
 use crate::{
-    dogstatsdreplayreader::{is_replay_header, DogStatsDReplayReader},
-    utf8dogstatsdreader::Utf8DogStatsDReader,
+    dogstatsdreplayreader::DogStatsDReplayReader, utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
 
@@ -31,21 +30,23 @@ impl DogStatsDReader {
     /// DogStatsD messages, or to the beginning of a DogStatsD Replay/Capture file
     /// Either sequence can be optionally zstd encoded, it will be automatically
     /// decoded if needed.
-    pub fn new(mut buf: Bytes) -> DogStatsDReader {
+    pub fn new(mut buf: Bytes) -> Self {
         let zstd_header = buf.slice(0..4);
         if is_zstd(&zstd_header) {
             buf = Bytes::from(zstd::decode_all(buf.reader()).unwrap());
         }
 
-        if let Ok(()) = is_replay_header(&buf.slice(0..8)) {
-            DogStatsDReader {
-                replay_reader: Some(DogStatsDReplayReader::new(buf)),
+        match DogStatsDReplayReader::new(buf.clone()) {
+            Ok(reader) => Self {
+                replay_reader: Some(reader),
                 utf8_reader: None,
-            }
-        } else {
-            DogStatsDReader {
-                replay_reader: None,
-                utf8_reader: Some(Utf8DogStatsDReader::new(buf)),
+            },
+            Err(e) => {
+                // TODO match on e to explicitly define behavior for each error case
+                Self {
+                    replay_reader: None,
+                    utf8_reader: Some(Utf8DogStatsDReader::new(buf)),
+                }
             }
         }
     }
@@ -53,7 +54,10 @@ impl DogStatsDReader {
     /// read_msg populates the given String with a dogstatsd message
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
         if let Some(ref mut replay) = self.replay_reader {
-            replay.read_msg(s)
+            match replay.read_msg(s) {
+                Ok(res) => Ok(res),
+                Err(e) => panic!("Err while reading from replay reader: {}", e),
+            }
         } else if let Some(ref mut ureader) = self.utf8_reader {
             ureader.read_msg(s)
         } else {

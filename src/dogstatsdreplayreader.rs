@@ -1,12 +1,9 @@
 use std::collections::VecDeque;
+use thiserror::Error;
 
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 
-use prost::Message;
-
-use crate::dogstatsdreplayreader::dogstatsd::unix::UnixDogstatsdMsg;
-
-const DATADOG_HEADER: [u8; 8] = [0xD4, 0x74, 0xD0, 0x60, 0xF0, 0xFF, 0x00, 0x00];
+use crate::replay::{ReplayReader, ReplayReaderError};
 
 pub mod dogstatsd {
     pub mod unix {
@@ -14,95 +11,66 @@ pub mod dogstatsd {
     }
 }
 
+#[derive(Error, Debug, PartialEq)]
+pub enum DogStatsDReplayReaderError {
+    #[error("No dogstatsd replay marker found")]
+    NotAReplayFile,
+    #[error("Unsupported replay version")]
+    UnsupportedReplayVersion,
+    #[error("Invalid UTF-8 sequence found in payload of msg")]
+    InvalidUtf8Sequence,
+}
+
 pub struct DogStatsDReplayReader {
-    buf: Bytes,
+    replay_msg_reader: ReplayReader,
     current_messages: VecDeque<String>,
 }
 
 impl DogStatsDReplayReader {
-    // TODO this currently returns an entire dogstatsd replay payload, which is not a single dogstatsd message.
-    pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+    pub fn read_msg(&mut self, s: &mut String) -> Result<usize, DogStatsDReplayReaderError> {
         if let Some(line) = self.current_messages.pop_front() {
             s.insert_str(0, &line);
             return Ok(1);
         }
 
-        if self.buf.remaining() < 4 {
-            return Ok(0); // end of stream
-        }
+        match self.replay_msg_reader.read_msg() {
+            Some(msg) => {
+                match std::str::from_utf8(&msg.payload) {
+                    Ok(v) => {
+                        if v.is_empty() {
+                            // Read operation was successful, read 0 msgs
+                            return Ok(0);
+                        }
 
-        // Read the little endian uint32 that gives the length of the next protobuf message
-        let message_length = self.buf.get_u32_le() as usize;
+                        for line in v.lines() {
+                            self.current_messages.push_back(String::from(line));
+                        }
 
-        if self.buf.remaining() < message_length {
-            return Ok(0); // end of stream
-        }
-
-        // Read the protobuf message
-        let msg_buf = self.buf.copy_to_bytes(message_length);
-
-        // Decode the protobuf message using the provided .proto file
-        let message = UnixDogstatsdMsg::decode(msg_buf)?;
-        match std::str::from_utf8(&message.payload) {
-            Ok(v) => {
-                if v.len() == 0 {
-                    return Ok(0); // end of stream
+                        self.read_msg(s)
+                    }
+                    Err(e) => Err(DogStatsDReplayReaderError::InvalidUtf8Sequence), // TODO add the msg or msg.payload that has the issue
                 }
-
-                // should already be empty
-                self.current_messages.clear();
-                for line in v.lines() {
-                    self.current_messages.push_back(String::from(line));
-                }
-
-                let line = self
-                    .current_messages
-                    .pop_front()
-                    .expect("Found no next line, why not?? ");
-
-                s.insert_str(0, &line);
-                Ok(1)
             }
-            Err(e) => panic!("Invalid utf-8 sequence: {}", e),
+            None => Ok(0), // Read was validly issued, just nothing to be read.
         }
     }
 
-    pub fn new(mut buf: Bytes) -> Self {
-        buf.advance(8); // eat the header
-
-        DogStatsDReplayReader {
-            buf,
-            current_messages: VecDeque::new(),
+    pub fn new(mut buf: Bytes) -> Result<Self, DogStatsDReplayReaderError> {
+        match ReplayReader::new(buf) {
+            Ok(reader) => Ok(DogStatsDReplayReader {
+                replay_msg_reader: reader,
+                current_messages: VecDeque::new(),
+            }),
+            Err(e) => match e {
+                ReplayReaderError::NotAReplayFile => {
+                    Err(DogStatsDReplayReaderError::NotAReplayFile)
+                }
+                ReplayReaderError::UnsupportedReplayVersion => {
+                    Err(DogStatsDReplayReaderError::UnsupportedReplayVersion)
+                }
+            },
         }
     }
-}
-
-pub fn is_replay_header(header: &[u8]) -> std::io::Result<()> {
-    if header.len() <= 4 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "Not enough bytes to determine if its a replay file",
-        ));
-    }
-
-    // f0 is bitwise or'd with the file version, so to get the file version, lets do a bitwise xor
-    let version = header[4] ^ 0xF0;
-
-    if version != 3 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Unexpected version, wanted 3 but found {}", version),
-        ));
-    }
-
-    if header[0..4] != DATADOG_HEADER[0..4] {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Did not find replay header. Found: {:X?}", header),
-        ));
-    }
-
-    return Ok(());
 }
 
 #[cfg(test)]
@@ -171,7 +139,7 @@ mod tests {
 
     #[test]
     fn two_msg_two_lines() {
-        let mut replay = DogStatsDReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH));
+        let mut replay = DogStatsDReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH)).unwrap();
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -186,7 +154,7 @@ mod tests {
 
     #[test]
     fn one_msg_two_lines() {
-        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_TWO_LINES));
+        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_TWO_LINES)).unwrap();
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -201,7 +169,7 @@ mod tests {
 
     #[test]
     fn one_msg_three_lines() {
-        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_THREE_LINES));
+        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_THREE_LINES)).unwrap();
         let mut s = String::new();
 
         let res = replay.read_msg(&mut s).unwrap();
