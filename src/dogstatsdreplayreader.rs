@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, str::Utf8Error};
 use thiserror::Error;
 
 use bytes::Bytes;
@@ -16,9 +16,9 @@ pub enum DogStatsDReplayReaderError {
     #[error("No dogstatsd replay marker found")]
     NotAReplayFile,
     #[error("Unsupported replay version")]
-    UnsupportedReplayVersion,
+    UnsupportedReplayVersion(u8),
     #[error("Invalid UTF-8 sequence found in payload of msg")]
-    InvalidUtf8Sequence,
+    InvalidUtf8Sequence(Utf8Error),
 }
 
 pub struct DogStatsDReplayReader {
@@ -48,14 +48,14 @@ impl DogStatsDReplayReader {
 
                         self.read_msg(s)
                     }
-                    Err(e) => Err(DogStatsDReplayReaderError::InvalidUtf8Sequence), // TODO add the msg or msg.payload that has the issue
+                    Err(e) => Err(DogStatsDReplayReaderError::InvalidUtf8Sequence(e)),
                 }
             }
             None => Ok(0), // Read was validly issued, just nothing to be read.
         }
     }
 
-    pub fn new(mut buf: Bytes) -> Result<Self, DogStatsDReplayReaderError> {
+    pub fn new(buf: Bytes) -> Result<Self, DogStatsDReplayReaderError> {
         match ReplayReader::new(buf) {
             Ok(reader) => Ok(DogStatsDReplayReader {
                 replay_msg_reader: reader,
@@ -65,8 +65,8 @@ impl DogStatsDReplayReader {
                 ReplayReaderError::NotAReplayFile => {
                     Err(DogStatsDReplayReaderError::NotAReplayFile)
                 }
-                ReplayReaderError::UnsupportedReplayVersion => {
-                    Err(DogStatsDReplayReaderError::UnsupportedReplayVersion)
+                ReplayReaderError::UnsupportedReplayVersion(e) => {
+                    Err(DogStatsDReplayReaderError::UnsupportedReplayVersion(e))
                 }
             },
         }

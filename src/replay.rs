@@ -26,10 +26,13 @@ pub enum ReplayReaderError {
     #[error("No dogstatsd replay marker found")]
     NotAReplayFile,
     #[error("Unsupported replay version")]
-    UnsupportedReplayVersion,
+    UnsupportedReplayVersion(u8),
 }
 
 impl ReplayReader {
+    pub fn supported_versions() -> &'static [u8] {
+        &[4]
+    }
     /// read_msg will return the next UnixDogstatsdMsg if it exists
     pub fn read_msg(&mut self) -> Option<UnixDogstatsdMsg> {
         if self.buf.remaining() < 4 || self.read_all_unixdogstatsdmsg {
@@ -77,7 +80,7 @@ impl ReplayReader {
         let version = buf.get_u8() ^ 0xF0;
 
         if version != 3 {
-            return Err(ReplayReaderError::UnsupportedReplayVersion);
+            return Err(ReplayReaderError::UnsupportedReplayVersion(version));
         }
         // Consume the next 3 bytes, the rest of the file header
         buf.advance(3);

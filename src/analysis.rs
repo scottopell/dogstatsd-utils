@@ -49,8 +49,8 @@ where
             // EOF
             break;
         }
-        out.write(line.as_bytes()).unwrap();
-        out.write(b"\n").unwrap();
+        out.write_all(line.as_bytes()).unwrap();
+        out.write_all(b"\n").unwrap();
         line.clear();
     }
 }
@@ -90,7 +90,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         let last_part = parts[parts.len() - 1];
         let mut num_tags = 0;
         let mut num_unicode_tags = 0;
-        if last_part.starts_with("#") {
+        if last_part.starts_with('#') {
             // these are tags
             let tags = last_part.split(',');
             for tag in tags {

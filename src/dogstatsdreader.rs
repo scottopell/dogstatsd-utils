@@ -2,7 +2,9 @@ use bytes::{Buf, Bytes};
 use thiserror::Error;
 
 use crate::{
-    dogstatsdreplayreader::DogStatsDReplayReader, utf8dogstatsdreader::Utf8DogStatsDReader,
+    dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
+    replay::ReplayReader,
+    utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
 
@@ -41,13 +43,21 @@ impl DogStatsDReader {
                 replay_reader: Some(reader),
                 utf8_reader: None,
             },
-            Err(e) => {
-                // TODO match on e to explicitly define behavior for each error case
-                Self {
+            Err(e) => match e {
+                DogStatsDReplayReaderError::NotAReplayFile => Self {
                     replay_reader: None,
                     utf8_reader: Some(Utf8DogStatsDReader::new(buf)),
+                },
+                DogStatsDReplayReaderError::UnsupportedReplayVersion(e) => {
+                    panic!("Encountered unsupported replay version. Found {} but only {:?} are supported", e, ReplayReader::supported_versions())
                 }
-            }
+                DogStatsDReplayReaderError::InvalidUtf8Sequence(e) => {
+                    panic!(
+                        "Parsed replay file, but encountered invalid UTF-8 in the payload. {}",
+                        e
+                    );
+                }
+            },
         }
     }
 
