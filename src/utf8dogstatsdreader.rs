@@ -11,18 +11,18 @@ impl Utf8DogStatsDReader {
     }
 
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
-        self.reader.read_line(s).and_then(|num_read| {
-            if num_read <= 0 {
-                return Ok(num_read);
+        self.reader.read_line(s).map(|num_read| {
+            if num_read == 0 {
+                return num_read;
             }
 
             let new_len = s.trim_end().len();
             s.truncate(new_len);
             if new_len == 0 {
-                return Ok(0);
+                return 0;
             }
 
-            Ok(1)
+            1
         })
     }
 }
