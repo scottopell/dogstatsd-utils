@@ -24,7 +24,7 @@ pub fn parse_rate(rate: &str) -> Option<RateSpecification> {
         let bytes_per_second = bytes.get_bytes() as u32;
         return Some(RateSpecification::ThroughputBased(bytes_per_second));
     }
-    return None;
+    None
 }
 
 #[cfg(test)]
