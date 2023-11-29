@@ -40,8 +40,9 @@ fn main() -> io::Result<()> {
     println!("# unicode tags per msg:\n{}", msg_stats.num_unicode_tags);
     println!("Metric Kind Breakdown:");
     for (kind, num_samples) in msg_stats.kind.iter() {
-        println!("Kind: {}, Count: {}", kind, num_samples);
+        println!("{}: {}", kind, num_samples);
     }
+    println!();
     println!("# of Unique Tags: {}", msg_stats.total_unique_tags);
 
     Ok(())

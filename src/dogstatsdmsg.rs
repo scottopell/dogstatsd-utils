@@ -34,6 +34,7 @@ pub struct DogStatsDMetricStr<'a> {
     pub name: &'a str,
     pub values: &'a str,
     pub metric_type: &'a str,
+    pub tags: Vec<&'a str>,
     pub raw_msg: &'a str,
 }
 
@@ -64,19 +65,21 @@ impl<'a> DogStatsDStr<'a> {
                 let name = name_and_values.0;
                 let values = name_and_values.1;
 
-                let metric_type_and_rest: Vec<&str> = match parts.get(1) {
-                    Some(s) => (*s).split('#').collect::<Vec<&str>>(),
-                    None => return Err(DogStatsDMsgError::InvalidFormat),
-                };
-                let metric_type = match metric_type_and_rest.first() {
+                let metric_type: &str = match parts.get(1) {
                     Some(s) => *s,
                     None => return Err(DogStatsDMsgError::InvalidFormat),
+                };
+
+                let tags = match parts.iter().find(|part| part.starts_with('#')) {
+                    Some(tags) => tags[1..].split(',').collect(),
+                    None => vec![],
                 };
 
                 Ok(DogStatsDStr::Metric(DogStatsDMetricStr {
                     raw_msg: str_msg,
                     name,
                     values,
+                    tags,
                     metric_type,
                 }))
             }
@@ -101,6 +104,7 @@ mod tests {
     fn basic_statsd_msg() {
         let msg = match DogStatsDStr::new("my.metric:1|g\n") {
             Ok(DogStatsDStr::Metric(m)) => m,
+            Err(e) => panic!("Error: {}", e),
             _ => panic!("Wrong type"),
         };
         assert_eq!(msg.raw_msg, "my.metric:1|g\n");
@@ -138,6 +142,20 @@ mod tests {
         // more formats to cover
         // <METRIC_NAME>:<VALUE>|h|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|c:<CONTAINER_ID>
         // <METRIC_NAME>:<VALUE1>:<VALUE2>:<VALUE3>|h|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+    }
+
+    #[test]
+    fn metrics_with_tags() {
+        let raw_msg = "my.metric:1|g|#env:prod,foo:bar\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
+            Ok(DogStatsDStr::Metric(m)) => m,
+            _ => panic!("Wrong type"),
+        };
+        assert_eq!(msg.raw_msg, raw_msg);
+        assert_eq!(msg.name, "my.metric");
+        assert_eq!(msg.values, "1");
+        assert_eq!(msg.metric_type, "g");
+        assert_eq!(msg.tags, vec!["env:prod", "foo:bar"]);
     }
 
     #[test]

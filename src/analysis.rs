@@ -6,7 +6,7 @@ use std::{
 
 use histo::Histogram;
 
-use crate::dogstatsdreader::DogStatsDReader;
+use crate::{dogstatsdmsg::DogStatsDStr, dogstatsdreader::DogStatsDReader};
 
 const DEFAULT_NUM_BUCKETS: u64 = 10;
 
@@ -90,75 +90,72 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
             // EOF
             break;
         }
-        let parts: Vec<&str> = line.split('|').collect();
-        let name_and_values: Vec<&str> = parts[0].split(':').collect();
-        let num_values = name_and_values.len() as u64 - 1;
+        let metric_msg = match DogStatsDStr::new(&line) {
+            Ok(DogStatsDStr::Metric(m)) => m,
+            Ok(DogStatsDStr::Event(_)) => {
+                msg_stats.kind.entry(Kind::Event).and_modify(|v| *v += 1);
+                line.clear();
+                continue;
+            }
+            Ok(DogStatsDStr::ServiceCheck(_)) => {
+                msg_stats
+                    .kind
+                    .entry(Kind::ServiceCheck)
+                    .and_modify(|v| *v += 1);
+                line.clear();
+                continue;
+            }
+            Err(e) => {
+                println!("Error parsing dogstatsd msg: {}", e);
+                line.clear();
+                continue;
+            }
+        };
+        let num_values = metric_msg.values.split(':').count() as u64;
 
-        let name = name_and_values[0];
-
-        let last_part = parts[parts.len() - 1];
-        let mut num_tags = 0;
         let mut num_unicode_tags = 0;
-        if last_part.starts_with('#') {
-            // these are tags
-            let tags = last_part.split(',');
-            for tag in tags {
-                num_tags += 1;
-                tags_seen.insert(tag.to_string());
-                if !tag.is_ascii() {
-                    num_unicode_tags += 1;
-                }
+        let num_tags = metric_msg.tags.len() as u64;
+        for tag in metric_msg.tags {
+            tags_seen.insert(tag.to_string());
+            if !tag.is_ascii() {
+                num_unicode_tags += 1;
             }
         }
 
-        msg_stats.name_length.add(name.len() as u64);
+        msg_stats.name_length.add(metric_msg.name.len() as u64);
         msg_stats.num_tags.add(num_tags);
         msg_stats.num_unicode_tags.add(num_unicode_tags);
         msg_stats.num_values.add(num_values);
 
-        match parts.get(1) {
-            Some(s) => match *s {
-                "d" => {
-                    msg_stats
-                        .kind
-                        .entry(Kind::Distribution)
-                        .and_modify(|v| *v += 1);
-                }
-                "ms" => {
-                    msg_stats.kind.entry(Kind::Timer).and_modify(|v| *v += 1);
-                }
-                "g" => {
-                    msg_stats.kind.entry(Kind::Gauge).and_modify(|v| *v += 1);
-                }
-                "c" => {
-                    msg_stats.kind.entry(Kind::Count).and_modify(|v| *v += 1);
-                }
-                "s" => {
-                    msg_stats.kind.entry(Kind::Set).and_modify(|v| *v += 1);
-                }
-                "h" => {
-                    msg_stats
-                        .kind
-                        .entry(Kind::Histogram)
-                        .and_modify(|v| *v += 1);
-                }
-                _ => {
-                    if line.starts_with("_sc") {
-                        msg_stats
-                            .kind
-                            .entry(Kind::ServiceCheck)
-                            .and_modify(|v| *v += 1);
-                    } else if line.starts_with("_e") {
-                        msg_stats.kind.entry(Kind::Event).and_modify(|v| *v += 1);
-                    } else {
-                        println!("Found unknown msg type for dogstatsd msg: {}", line);
-                    }
-                }
-            },
-            _ => {
-                println!("Found unusual dogstatsd msg: '{}'", line);
+        match metric_msg.metric_type {
+            "d" => {
+                msg_stats
+                    .kind
+                    .entry(Kind::Distribution)
+                    .and_modify(|v| *v += 1);
             }
-        };
+            "ms" => {
+                msg_stats.kind.entry(Kind::Timer).and_modify(|v| *v += 1);
+            }
+            "g" => {
+                msg_stats.kind.entry(Kind::Gauge).and_modify(|v| *v += 1);
+            }
+            "c" => {
+                msg_stats.kind.entry(Kind::Count).and_modify(|v| *v += 1);
+            }
+            "s" => {
+                msg_stats.kind.entry(Kind::Set).and_modify(|v| *v += 1);
+            }
+            "h" => {
+                msg_stats
+                    .kind
+                    .entry(Kind::Histogram)
+                    .and_modify(|v| *v += 1);
+            }
+            _ => {
+                println!("Found unknown msg type for dogstatsd msg: {}", line);
+            }
+        }
 
         line.clear();
     }
