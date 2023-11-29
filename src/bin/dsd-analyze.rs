@@ -26,6 +26,7 @@ fn main() -> io::Result<()> {
     } else {
         let mut contents = Vec::new();
         // TODO handle empty stream better probably
+        // and consolidate this amongst dsd-cat and dsd-analyze
         io::stdin().read_to_end(&mut contents).unwrap();
         Bytes::from(contents)
     };

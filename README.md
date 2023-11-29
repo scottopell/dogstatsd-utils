@@ -12,12 +12,14 @@ Note for dogstatsd replay files, it ignores the other metadata such as timestamp
 
 ```
 ./target/release/dsd-cat --help
-Take data from the specified input file and write it either to stdout or to a specified file Data can be raw utf-8 text or a dogstatsd-replay file Data can be zstd encoded
+Take data from the specified input file and write it either to stdout or to a specified file. Data can be raw utf-8 text or a dogstatsd-replay file, optionally zstd encoded
 
-Usage: dsd-cat [OPTIONS] --input <INPUT>
+Usage: dsd-cat [OPTIONS] [INPUT]
+
+Arguments:
+  [INPUT]  File containing dogstatsd data
 
 Options:
-  -i, --input <INPUT>    File containing dogstatsd replay data
   -o, --output <OUTPUT>  Where output dogstatsd messages should go
   -h, --help             Print help
   -V, --version          Print version
