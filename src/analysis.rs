@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Display, io::Write};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    io::Write,
+};
 
 use histo::Histogram;
 
@@ -38,8 +42,9 @@ pub struct DogStatsDBatchStats {
     pub num_values: Histogram,
     pub num_tags: Histogram,
     pub num_unicode_tags: Histogram,
-    pub kind: HashMap<Kind, u16>,
+    pub kind: HashMap<Kind, u32>,
     pub num_contexts: u32,
+    pub total_unique_tags: u32,
 }
 
 pub fn print_msgs<T>(reader: &mut DogStatsDReader, mut out: T)
@@ -66,6 +71,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         num_tags: Histogram::with_buckets(default_num_buckets),
         num_unicode_tags: Histogram::with_buckets(default_num_buckets),
         kind: HashMap::new(),
+        total_unique_tags: 0,
         num_contexts: 0,
     };
 
@@ -77,6 +83,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
     msg_stats.kind.insert(Kind::ServiceCheck, 0);
     msg_stats.kind.insert(Kind::Set, 0);
 
+    let mut tags_seen: HashSet<String> = HashSet::new();
     let mut line = String::new();
     while let Ok(num_read) = reader.read_msg(&mut line) {
         if num_read == 0 {
@@ -97,6 +104,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
             let tags = last_part.split(',');
             for tag in tags {
                 num_tags += 1;
+                tags_seen.insert(tag.to_string());
                 if !tag.is_ascii() {
                     num_unicode_tags += 1;
                 }
@@ -155,6 +163,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         line.clear();
     }
 
+    msg_stats.total_unique_tags = tags_seen.len() as u32;
     Ok(msg_stats)
 }
 

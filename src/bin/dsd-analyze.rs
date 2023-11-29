@@ -34,13 +34,15 @@ fn main() -> io::Result<()> {
 
     let msg_stats = analyze_msgs(&mut reader)?;
 
-    println!("# values per msg:\n{}", msg_stats.num_values);
     println!("Name Length:\n{}", msg_stats.name_length);
-    println!("# of Tags:\n{}", msg_stats.num_tags);
-    println!("# of Unicode Tags: {}", msg_stats.num_unicode_tags);
+    println!("# values per msg:\n{}", msg_stats.num_values);
+    println!("# tags per msg:\n{}", msg_stats.num_tags);
+    println!("# unicode tags per msg:\n{}", msg_stats.num_unicode_tags);
+    println!("Metric Kind Breakdown:");
     for (kind, num_samples) in msg_stats.kind.iter() {
         println!("Kind: {}, Count: {}", kind, num_samples);
     }
+    println!("# of Unique Tags: {}", msg_stats.total_unique_tags);
 
     Ok(())
 }
