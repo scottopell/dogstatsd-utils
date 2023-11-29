@@ -7,20 +7,52 @@ pub enum DogStatsDMsgError {
     #[error("Invalid format for msg")]
     InvalidFormat,
 }
+
 #[derive(Debug)]
-pub struct DogStatsDStr<'a> {
+pub enum DogStatsDStr<'a> {
+    Metric(DogStatsDMetricStr<'a>),
+    Event(DogStatsDEventStr<'a>),
+    ServiceCheck(DogStatsDServiceCheckStr<'a>),
+}
+
+#[derive(Debug)]
+pub struct DogStatsDEventStr<'a> {
+    pub title: &'a str,
+    pub text: &'a str,
+    pub raw_msg: &'a str,
+}
+
+#[derive(Debug)]
+pub struct DogStatsDServiceCheckStr<'a> {
+    pub name: &'a str,
+    pub status: &'a str,
+    pub raw_msg: &'a str,
+}
+
+#[derive(Debug)]
+pub struct DogStatsDMetricStr<'a> {
     pub name: &'a str,
     pub values: &'a str,
     pub metric_type: &'a str,
     pub raw_msg: &'a str,
 }
-// DogStatsDStr should be a union if DogStatsDMetricStr | DogStatsDEventStr | DogStatsDServiceCheckStr
-// ::parse should return DogStatsDStr according to the input
-// (well, Result<DogStatsDStr>)
-// But I'm done for the day
 
 impl<'a> DogStatsDStr<'a> {
     pub fn new(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
+        if str_msg.starts_with("_e") {
+            return Ok(DogStatsDStr::Event(DogStatsDEventStr {
+                title: "placeholder",
+                text: "placeholder_raw_full_msg",
+                raw_msg: str_msg,
+            }));
+        }
+        if str_msg.starts_with("_sc") {
+            return Ok(DogStatsDStr::ServiceCheck(DogStatsDServiceCheckStr {
+                name: "placeholder",
+                status: "placeholder_status",
+                raw_msg: str_msg,
+            }));
+        }
         let parts: Vec<&str> = str_msg.trim_end().split('|').collect();
         match parts.first() {
             Some(prepipe) => {
@@ -41,12 +73,12 @@ impl<'a> DogStatsDStr<'a> {
                     None => return Err(DogStatsDMsgError::InvalidFormat),
                 };
 
-                Ok(Self {
+                Ok(DogStatsDStr::Metric(DogStatsDMetricStr {
                     raw_msg: str_msg,
                     name,
                     values,
                     metric_type,
-                })
+                }))
             }
             None => Err(DogStatsDMsgError::InvalidFormat),
         }
@@ -67,23 +99,38 @@ mod tests {
 
     #[test]
     fn basic_statsd_msg() {
-        let msg = DogStatsDStr::new("my.metric:1|g\n").unwrap();
+        let msg = match DogStatsDStr::new("my.metric:1|g\n") {
+            Ok(DogStatsDStr::Metric(m)) => m,
+            _ => panic!("Wrong type"),
+        };
         assert_eq!(msg.raw_msg, "my.metric:1|g\n");
         assert_eq!(msg.name, "my.metric");
         assert_eq!(msg.values, "1");
         assert_eq!(msg.metric_type, "g");
 
-        let msg = DogStatsDStr::new("my.metric:2|c\n").unwrap();
+        let raw_msg = "my.metric:2|c\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
+            Ok(DogStatsDStr::Metric(m)) => m,
+            _ => panic!("Wrong type"),
+        };
         assert_eq!(msg.name, "my.metric");
         assert_eq!(msg.values, "2");
         assert_eq!(msg.metric_type, "c");
 
-        let msg = DogStatsDStr::new("my.metric:2.45|d\n").unwrap();
+        let raw_msg = "my.metric:2.45|d\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
+            Ok(DogStatsDStr::Metric(m)) => m,
+            _ => panic!("Wrong type"),
+        };
         assert_eq!(msg.name, "my.metric");
         assert_eq!(msg.values, "2.45");
         assert_eq!(msg.metric_type, "d");
 
-        let msg = DogStatsDStr::new("my.metric:2.45:3.45|d\n").unwrap();
+        let raw_msg = "my.metric:2.45:3.45|d\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
+            Ok(DogStatsDStr::Metric(m)) => m,
+            _ => panic!("Wrong type"),
+        };
         assert_eq!(msg.name, "my.metric");
         assert_eq!(msg.values, "2.45:3.45");
         assert_eq!(msg.metric_type, "d");
@@ -96,11 +143,25 @@ mod tests {
     #[test]
     fn basic_events() {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+        let raw_msg = "_e{2,4}:ab|cdef|d:160|h:myhost|p:high|t:severe|#env:prod,onfire:true\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
+            Ok(DogStatsDStr::Event(m)) => m,
+            _ => panic!("Wrong type"),
+        };
+        // Not implemented yet
+        // assert_eq!(msg.title, "ab");
+        // assert_eq!(msg.text, "cdef");
     }
 
     #[test]
     fn basic_service_checks() {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
+        let raw_msg = "_sc:ab|error|d:160|h:myhost|#env:prod,onfire:true|m:mymessage\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
+            Ok(DogStatsDStr::ServiceCheck(m)) => m,
+            _ => panic!("Wrong type"),
+        };
+        // No other fields implemented
     }
 
     #[test]
