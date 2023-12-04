@@ -1,6 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet},
     fmt::Display,
+    hash::{BuildHasher, Hasher},
     io::Write,
 };
 
@@ -85,6 +86,8 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
 
     let mut tags_seen: HashSet<String> = HashSet::new();
     let mut line = String::new();
+    let mut context_map: HashMap<u64, u64> = HashMap::new();
+    let hash_builder = RandomState::new();
     while let Ok(num_read) = reader.read_msg(&mut line) {
         if num_read == 0 {
             // EOF
@@ -115,7 +118,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
 
         let mut num_unicode_tags = 0;
         let num_tags = metric_msg.tags.len() as u64;
-        for tag in metric_msg.tags {
+        for tag in &metric_msg.tags {
             tags_seen.insert(tag.to_string());
             if !tag.is_ascii() {
                 num_unicode_tags += 1;
@@ -126,6 +129,22 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         msg_stats.num_tags.add(num_tags);
         msg_stats.num_unicode_tags.add(num_unicode_tags);
         msg_stats.num_values.add(num_values);
+
+        let mut metric_context = hash_builder.build_hasher();
+        metric_context.write_usize(metric_msg.name.len());
+        metric_context.write(metric_msg.name.as_bytes());
+        // Use a BTreeSet to ensure that the tags are sorted
+        let labels: BTreeSet<&&str> = metric_msg.tags.iter().collect();
+        let metric_context = labels
+            .iter()
+            .fold(metric_context, |mut hasher, t| {
+                hasher.write_usize(t.len());
+                hasher.write(t.as_bytes());
+                hasher
+            })
+            .finish();
+        let context_entry = context_map.entry(metric_context).or_default();
+        *context_entry += 1;
 
         match metric_msg.metric_type {
             "d" => {
@@ -161,6 +180,7 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
     }
 
     msg_stats.total_unique_tags = tags_seen.len() as u32;
+    msg_stats.num_contexts = context_map.len() as u32;
     Ok(msg_stats)
 }
 

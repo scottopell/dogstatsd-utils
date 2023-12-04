@@ -45,6 +45,7 @@ fn main() -> io::Result<()> {
     }
     println!();
     println!("# of Unique Tags: {}", msg_stats.total_unique_tags);
+    println!("# of Contexts: {}", msg_stats.num_contexts);
 
     Ok(())
 }
