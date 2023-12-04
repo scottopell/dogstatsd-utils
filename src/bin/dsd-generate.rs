@@ -17,7 +17,11 @@ use tracing::info;
 struct Args {
     /// Emit this finite amount of msgs
     #[arg(short, long)]
-    num_msgs: Option<u16>,
+    num_msgs: Option<u32>,
+
+    /// Emit this number of unique contexts
+    #[arg(short, long)]
+    num_contexts: Option<u32>,
 
     /// metric_types is optional and if specified will emit only metrics of the given types
     #[arg(long, value_delimiter = ',')]
@@ -109,9 +113,14 @@ async fn main() -> Result<(), DSDGenerateError> {
             histogram_weight,
         );
     }
+
+    let context_range = match args.num_contexts {
+        Some(num_contexts) => dogstatsd::ConfRange::Constant(num_contexts),
+        None => dogstatsd::ConfRange::Inclusive { min: 100, max: 500 },
+    };
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
-        dogstatsd::ConfRange::Inclusive { min: 100, max: 500 },
+        context_range,
         // Service check name length
         dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
         // name length
