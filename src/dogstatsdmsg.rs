@@ -162,7 +162,7 @@ mod tests {
     fn basic_events() {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         let raw_msg = "_e{2,4}:ab|cdef|d:160|h:myhost|p:high|t:severe|#env:prod,onfire:true\n";
-        let msg = match DogStatsDStr::new(raw_msg) {
+        match DogStatsDStr::new(raw_msg) {
             Ok(DogStatsDStr::Event(m)) => m,
             _ => panic!("Wrong type"),
         };
@@ -175,7 +175,7 @@ mod tests {
     fn basic_service_checks() {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         let raw_msg = "_sc:ab|error|d:160|h:myhost|#env:prod,onfire:true|m:mymessage\n";
-        let msg = match DogStatsDStr::new(raw_msg) {
+        match DogStatsDStr::new(raw_msg) {
             Ok(DogStatsDStr::ServiceCheck(m)) => m,
             _ => panic!("Wrong type"),
         };
