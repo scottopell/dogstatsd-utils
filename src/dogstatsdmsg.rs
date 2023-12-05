@@ -218,11 +218,16 @@ mod tests {
                     }
                     Ok(DogStatsDStr::Event(_)) => panic!("Got event, expected metric"),
                     Err(e) => match $expected_error {
-                        Some(expected_error) => {
-                            match e {
-                                expected_error => { return; /* if error type matches, we're good */ }
-                                _ => panic!("Got error {} which does not match what was expected", e),
-                            }
+                        Some(_expected_error) => {
+                            // TODO check if the expected_error is the "same" as 'e'
+                            // expected_error is ideally 'DogStatsDMsgError::InvalidMetric'
+                            // and that should match 'e' if 'e' is _any_ DogStatsDMsgError::InvalidMetric
+                            // ie, should match DogStatsDMsgError::InvalidMetric("foo")
+                            //
+                            // The strings in this error are meant to be human-readable descriptions of the
+                            // specific "invalidation", so I don't want to match the exact same
+                            // phrasing in the test code.
+                            return;
                         }
                         None => panic!("Unexpected error: {}", e),
                     },
@@ -251,11 +256,17 @@ mod tests {
                     }
                     Ok(DogStatsDStr::Metric(_)) => panic!("Got metric, expected event"),
                     Err(e) => match $expected_error {
-                        Some(expected_error) => {
-                            match e {
-                                expected_error => { return; /* if error type matches, we're good */ }
-                                _ => panic!("Got error {} which does not match what was expected", e),
-                            }
+                        Some(_expected_error) => {
+                            // TODO check if the expected_error is the "same" as 'e'
+                            // expected_error is ideally 'DogStatsDMsgError::InvalidEvent'
+                            // and that should match 'e' if 'e' is _any_
+                            // DogStatsDMsgError::InvalidEvent
+                            // ie, should match DogStatsDMsgError::InvalidEvent("foo")
+                            //
+                            // The strings in this error are meant to be human-readable descriptions of the
+                            // specific "invalidation", so I don't want to match the exact same
+                            // phrasing in the test code.
+                            return;
                         }
                         None => panic!("Unexpected error: {}", e),
                     },
@@ -531,6 +542,19 @@ mod tests {
         Some("severe"),
         vec!["env:prod", "onfire:true"],
         None::<DogStatsDMsgError>
+    );
+
+    event_test!(
+        invalid_event_text_length,
+        "_e{100,0}:t|",
+        "t",
+        "",
+        None,
+        None,
+        None,
+        None,
+        Vec::<&str>::new(),
+        Some(DogStatsDMsgError::InvalidEvent)
     );
 
     #[test]
