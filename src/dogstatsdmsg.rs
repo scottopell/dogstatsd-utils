@@ -4,8 +4,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum DogStatsDMsgError {
-    #[error("Invalid format for msg {0}")]
-    InvalidFormat(&'static str),
+    #[error("Metric parsing error: {0}")]
+    InvalidMetric(&'static str),
     #[error("Event parsing error: {0}")]
     InvalidEvent(&'static str),
 }
@@ -151,14 +151,14 @@ impl<'a> DogStatsDStr<'a> {
                 let prepipe_deref = *prepipe;
                 let name_and_values = match prepipe_deref.split_once(':') {
                     Some(n_and_v) => n_and_v,
-                    None => return Err(DogStatsDMsgError::InvalidFormat("Name or value missing")),
+                    None => return Err(DogStatsDMsgError::InvalidMetric("Name or value missing")),
                 };
                 let name = name_and_values.0;
                 let values = name_and_values.1;
 
                 let metric_type: &str = match parts.get(1) {
                     Some(s) => *s,
-                    None => return Err(DogStatsDMsgError::InvalidFormat("No metric type found")),
+                    None => return Err(DogStatsDMsgError::InvalidMetric("No metric type found")),
                 };
 
                 let tags = match parts.iter().find(|part| part.starts_with('#')) {
@@ -190,7 +190,7 @@ impl<'a> DogStatsDStr<'a> {
                     metric_type,
                 }))
             }
-            None => Err(DogStatsDMsgError::InvalidFormat("Unknown error")),
+            None => Err(DogStatsDMsgError::InvalidMetric("Unknown error")),
         }
     }
 }
@@ -489,7 +489,7 @@ mod tests {
         None,
         None,
         None,
-        Some(DogStatsDMsgError::InvalidFormat("Name or value missing"))
+        Some(DogStatsDMsgError::InvalidMetric("Name or value missing"))
     );
 
     event_test!(
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn invalid_statsd_msg() {
         assert_eq!(
-            DogStatsDMsgError::InvalidFormat("Name or value missing"),
+            DogStatsDMsgError::InvalidMetric("Name or value missing"),
             DogStatsDStr::new("abcdefghiq").unwrap_err()
         );
     }
