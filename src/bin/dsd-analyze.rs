@@ -40,8 +40,15 @@ fn main() -> io::Result<()> {
     println!("# tags per msg:\n{}", msg_stats.num_tags);
     println!("# unicode tags per msg:\n{}", msg_stats.num_unicode_tags);
     println!("Metric Kind Breakdown:");
-    for (kind, num_samples) in msg_stats.kind.iter() {
-        println!("{}: {}", kind, num_samples);
+    for (kind, (cnt, per_type)) in msg_stats.kind.iter() {
+        if let Some(per_type) = per_type {
+            println!("{} Total {}", kind, cnt);
+            for (t, cnt) in per_type.iter() {
+                println!("{}: {}", t, cnt);
+            }
+        } else {
+            println!("{}: {}", kind, cnt);
+        }
     }
     println!();
     println!("# of Unique Tags: {}", msg_stats.total_unique_tags);

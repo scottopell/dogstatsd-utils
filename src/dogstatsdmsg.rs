@@ -1,13 +1,29 @@
-use std::fmt::Debug;
+use std::fmt::Display;
 
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum DogStatsDMsgError {
+    #[error("Parsing Error for {kind}: '{reason}' Full msg: '{raw_msg}'")]
+    ParseError {
+        kind: DogStatsDMsgKind,
+        reason: &'static str,
+        raw_msg: String,
+    },
     #[error("Metric parsing error: {0}")]
     InvalidMetric(&'static str),
     #[error("Event parsing error: {0}")]
     InvalidEvent(&'static str),
+}
+
+impl DogStatsDMsgError {
+    fn new_parse_error(kind: DogStatsDMsgKind, reason: &'static str, raw_msg: String) -> Self {
+        return Self::ParseError {
+            kind,
+            reason,
+            raw_msg,
+        };
+    }
 }
 
 #[derive(Debug)]
@@ -46,51 +62,129 @@ pub struct DogStatsDMetricStr<'a> {
     pub sample_rate: Option<&'a str>,
     pub timestamp: Option<&'a str>,
     pub container_id: Option<&'a str>,
-    pub metric_type: &'a str,
+    pub metric_type: DogStatsDMetricType,
     pub tags: Vec<&'a str>,
     pub raw_msg: &'a str,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum DogStatsDMetricType {
+    Count,
+    Gauge,
+    Histogram,
+    Timer,
+    Set,
+    Distribution,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum DogStatsDMsgKind {
+    Metric,
+    ServiceCheck,
+    Event,
+}
+
+impl Display for DogStatsDMsgKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DogStatsDMsgKind::Metric => write!(f, "Metric"),
+            DogStatsDMsgKind::ServiceCheck => write!(f, "ServiceCheck"),
+            DogStatsDMsgKind::Event => write!(f, "Event"),
+        }
+    }
+}
+
+impl DogStatsDMetricType {
+    fn from_str(s: &str) -> Result<Self, DogStatsDMsgError> {
+        match s {
+            "c" => Ok(DogStatsDMetricType::Count),
+            "g" => Ok(DogStatsDMetricType::Gauge),
+            "h" => Ok(DogStatsDMetricType::Histogram),
+            "ms" => Ok(DogStatsDMetricType::Timer),
+            "s" => Ok(DogStatsDMetricType::Set),
+            "d" => Ok(DogStatsDMetricType::Distribution),
+            _ => Err(DogStatsDMsgError::InvalidMetric(
+                "Unknown metric type specified",
+            )),
+        }
+    }
+}
+
+impl Display for DogStatsDMetricType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DogStatsDMetricType::Count => write!(f, "Count"),
+            DogStatsDMetricType::Gauge => write!(f, "Gauge"),
+            DogStatsDMetricType::Histogram => write!(f, "Histogram"),
+            DogStatsDMetricType::Timer => write!(f, "Timer"),
+            DogStatsDMetricType::Set => write!(f, "Set"),
+            DogStatsDMetricType::Distribution => write!(f, "Distribution"),
+        }
+    }
+}
+
 impl<'a> DogStatsDStr<'a> {
+    pub fn kind(self) -> DogStatsDMsgKind {
+        match self {
+            DogStatsDStr::Event(_) => DogStatsDMsgKind::Event,
+            DogStatsDStr::ServiceCheck(_) => DogStatsDMsgKind::ServiceCheck,
+            DogStatsDStr::Metric(_) => DogStatsDMsgKind::Metric,
+        }
+    }
     // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
     fn parse_event(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
         let orig_msg = str_msg;
         let str_msg = str_msg.trim_end();
-        let start_lengths_idx = str_msg
-            .find('{')
-            .ok_or(DogStatsDMsgError::InvalidEvent("No opening brace found"))?;
-        let end_lengths_idx = str_msg
-            .find('}')
-            .ok_or(DogStatsDMsgError::InvalidEvent("No closing brace found"))?;
+        let start_lengths_idx = str_msg.find('{').ok_or(DogStatsDMsgError::new_parse_error(
+            DogStatsDMsgKind::Event,
+            "No opening brace found",
+            str_msg.to_owned(),
+        ))?;
+        let end_lengths_idx = str_msg.find('}').ok_or(DogStatsDMsgError::new_parse_error(
+            DogStatsDMsgKind::Event,
+            "No closing brace found",
+            str_msg.to_owned(),
+        ))?;
 
         let lengths = &str_msg[start_lengths_idx + 1..end_lengths_idx]
             .split(",")
             .collect::<Vec<&str>>();
-        let title_length: usize = lengths[0]
-            .parse()
-            .map_err(|_e| DogStatsDMsgError::InvalidEvent("Invalid title length specified"))?;
+        let title_length: usize = lengths[0].parse().map_err(|_e| {
+            DogStatsDMsgError::new_parse_error(
+                DogStatsDMsgKind::Event,
+                "Invalid title length specified",
+                str_msg.to_owned(),
+            )
+        })?;
 
-        let text_length: usize = lengths[1]
-            .parse()
-            .map_err(|_e| DogStatsDMsgError::InvalidEvent("Invalid text length specified"))?;
+        let text_length: usize = lengths[1].parse().map_err(|_e| {
+            DogStatsDMsgError::new_parse_error(
+                DogStatsDMsgKind::Event,
+                "Invalid text length specified",
+                str_msg.to_owned(),
+            )
+        })?;
 
         let title_start_idx = end_lengths_idx + 2;
         let title_end_idx = title_start_idx + title_length;
         let text_start_idx = title_end_idx + 1;
         let text_end_idx = text_start_idx + text_length;
 
-        let title =
-            str_msg
-                .get(title_start_idx..title_end_idx)
-                .ok_or(DogStatsDMsgError::InvalidEvent(
-                    "Title length specified is longer than msg length",
-                ))?;
+        let title = str_msg.get(title_start_idx..title_end_idx).ok_or(
+            DogStatsDMsgError::new_parse_error(
+                DogStatsDMsgKind::Event,
+                "Title length specified is longer than msg length",
+                str_msg.to_owned(),
+            ),
+        )?;
 
         let text =
             str_msg
                 .get(text_start_idx..text_end_idx)
-                .ok_or(DogStatsDMsgError::InvalidEvent(
+                .ok_or(DogStatsDMsgError::new_parse_error(
+                    DogStatsDMsgKind::Event,
                     "Text length specified is longer than msg length",
+                    str_msg.to_owned(),
                 ))?;
 
         // Initialize optional fields
@@ -104,8 +198,10 @@ impl<'a> DogStatsDStr<'a> {
         if post_text_idx < str_msg.len() {
             let post_text_msg = &str_msg[post_text_idx..];
             if !post_text_msg.starts_with('|') {
-                return Err(DogStatsDMsgError::InvalidEvent(
+                return Err(DogStatsDMsgError::new_parse_error(
+                    DogStatsDMsgKind::Event,
                     "data present after title and text, but did not start with a pipe",
+                    str_msg.to_owned(),
                 ));
             }
             for part in post_text_msg[1..].split('|') {
@@ -116,7 +212,11 @@ impl<'a> DogStatsDStr<'a> {
                     Some('t') => alert_type = Some(&part[2..]),
                     Some('#') => tags.extend(part[1..].split(',')),
                     _ => {
-                        return Err(DogStatsDMsgError::InvalidEvent("Unknown field value found"));
+                        return Err(DogStatsDMsgError::new_parse_error(
+                            DogStatsDMsgKind::Event,
+                            "Unknown event field value found",
+                            str_msg.to_owned(),
+                        ));
                     }
                 }
             }
@@ -134,31 +234,43 @@ impl<'a> DogStatsDStr<'a> {
         }))
     }
 
-    pub fn new(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
-        if str_msg.starts_with("_e") {
-            return Self::parse_event(str_msg);
-        }
-        if str_msg.starts_with("_sc") {
-            return Ok(DogStatsDStr::ServiceCheck(DogStatsDServiceCheckStr {
-                name: "placeholder",
-                status: "placeholder_status",
-                raw_msg: str_msg,
-            }));
-        }
-        let parts: Vec<&str> = str_msg.trim_end().split('|').collect();
+    fn parse_metric(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
+        let str_msg = str_msg.trim_end();
+        let parts: Vec<&str> = str_msg.split('|').collect();
         match parts.first() {
             Some(prepipe) => {
                 let prepipe_deref = *prepipe;
                 let name_and_values = match prepipe_deref.split_once(':') {
                     Some(n_and_v) => n_and_v,
-                    None => return Err(DogStatsDMsgError::InvalidMetric("Name or value missing")),
+                    None => {
+                        return Err(DogStatsDMsgError::new_parse_error(
+                            DogStatsDMsgKind::Metric,
+                            "Name or value missing",
+                            str_msg.to_owned(),
+                        ))
+                    }
                 };
                 let name = name_and_values.0;
                 let values = name_and_values.1;
 
-                let metric_type: &str = match parts.get(1) {
-                    Some(s) => *s,
-                    None => return Err(DogStatsDMsgError::InvalidMetric("No metric type found")),
+                let metric_type: DogStatsDMetricType = match parts.get(1) {
+                    Some(s) => {
+                        if s.len() > 2 {
+                            return Err(DogStatsDMsgError::new_parse_error(
+                                DogStatsDMsgKind::Metric,
+                                "Too many chars for metric type",
+                                str_msg.to_owned(),
+                            ));
+                        }
+                        DogStatsDMetricType::from_str(s)?
+                    }
+                    None => {
+                        return Err(DogStatsDMsgError::new_parse_error(
+                            DogStatsDMsgKind::Metric,
+                            "No metric type found",
+                            str_msg.to_owned(),
+                        ))
+                    }
                 };
 
                 let tags = match parts.iter().find(|part| part.starts_with('#')) {
@@ -190,8 +302,26 @@ impl<'a> DogStatsDStr<'a> {
                     metric_type,
                 }))
             }
-            None => Err(DogStatsDMsgError::InvalidMetric("Unknown error")),
+            None => Err(DogStatsDMsgError::new_parse_error(
+                DogStatsDMsgKind::Metric,
+                "Unknown error",
+                str_msg.to_owned(),
+            )),
         }
+    }
+
+    pub fn new(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
+        if str_msg.starts_with("_e") {
+            return Self::parse_event(str_msg);
+        }
+        if str_msg.starts_with("_sc") {
+            return Ok(DogStatsDStr::ServiceCheck(DogStatsDServiceCheckStr {
+                name: "placeholder",
+                status: "placeholder_status",
+                raw_msg: str_msg,
+            }));
+        }
+        Self::parse_metric(str_msg)
     }
 }
 
@@ -289,7 +419,7 @@ mod tests {
         "metric.name:1|c",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         Vec::<&str>::new(),
         None,
         None,
@@ -302,7 +432,7 @@ mod tests {
         "metric.name:1|g",
         "metric.name",
         "1",
-        "g",
+        DogStatsDMetricType::Gauge,
         Vec::<&str>::new(),
         None,
         None,
@@ -315,7 +445,7 @@ mod tests {
         "metric.name:1|h",
         "metric.name",
         "1",
-        "h",
+        DogStatsDMetricType::Histogram,
         Vec::<&str>::new(),
         None,
         None,
@@ -325,10 +455,10 @@ mod tests {
 
     metric_test!(
         basic_timer,
-        "metric.name:1|t",
+        "metric.name:1|ms",
         "metric.name",
         "1",
-        "t",
+        DogStatsDMetricType::Timer,
         Vec::<&str>::new(),
         None,
         None,
@@ -341,7 +471,7 @@ mod tests {
         "metric.name:1|s",
         "metric.name",
         "1",
-        "s",
+        DogStatsDMetricType::Set,
         Vec::<&str>::new(),
         None,
         None,
@@ -354,7 +484,7 @@ mod tests {
         "metric.name:1.321|g",
         "metric.name",
         "1.321",
-        "g",
+        DogStatsDMetricType::Gauge,
         Vec::<&str>::new(),
         None,
         None,
@@ -367,7 +497,7 @@ mod tests {
         "metric.name:1.321|d",
         "metric.name",
         "1.321",
-        "d",
+        DogStatsDMetricType::Distribution,
         Vec::<&str>::new(),
         None,
         None,
@@ -380,7 +510,7 @@ mod tests {
         "metric.name:1.321:1.11111|d",
         "metric.name",
         "1.321:1.11111",
-        "d",
+        DogStatsDMetricType::Distribution,
         Vec::<&str>::new(),
         None,
         None,
@@ -393,7 +523,7 @@ mod tests {
         "metric.name:1|c|c:container123",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         Vec::<&str>::new(),
         None,
         None,
@@ -406,7 +536,7 @@ mod tests {
         "metric.name:1|c|@0.5|T1234567890|c:container123|#tag1:value1,tag2",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         vec!["tag1:value1", "tag2"],
         Some("0.5"),
         Some("1234567890"),
@@ -419,7 +549,7 @@ mod tests {
         "metric.name:1|c|#tag1:value1,tag2|@0.5|c:container123|T1234567890",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         vec!["tag1:value1", "tag2"],
         Some("0.5"),
         Some("1234567890"),
@@ -432,7 +562,7 @@ mod tests {
         "metric.name:1|c|#tag1:value1,tag2,tag3:another",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         vec!["tag1:value1", "tag2", "tag3:another"],
         None,
         None,
@@ -445,7 +575,7 @@ mod tests {
         "metric.name:1|c",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         Vec::<&str>::new(),
         None,
         None,
@@ -458,7 +588,7 @@ mod tests {
         "metric.name:1|c|x:unknown",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         Vec::<&str>::new(),
         None,
         None,
@@ -471,12 +601,12 @@ mod tests {
         "metric.name:|c",
         "metric.name",
         "",
-        "c",
+        DogStatsDMetricType::Count,
         Vec::<&str>::new(),
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        None::<DogStatsDMsgError> // should be an error probably
     );
 
     metric_test!(
@@ -484,12 +614,25 @@ mod tests {
         "metric.name|1|c",
         "metric.name",
         "1",
-        "c",
+        DogStatsDMetricType::Count,
         Vec::<&str>::new(),
         None,
         None,
         None,
         Some(DogStatsDMsgError::InvalidMetric("Name or value missing"))
+    );
+
+    metric_test!(
+        security_msg,
+        "datadog.security_agent.compliance.inputs.duration_ms:19.489043|ms|#dd.internal.entity_id:484d54a7-8851-490f-9efa-9fd7f870cdb8,env:staging,service:datadog-agent,rule_id:xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly,rule_input_type:xccdf,agent_version:7.48.0-rc.0+git.217.1425a0f",
+        "datadog.security_agent.compliance.inputs.duration_ms",
+        "19.489043",
+        DogStatsDMetricType::Timer,
+        vec!["dd.internal.entity_id:484d54a7-8851-490f-9efa-9fd7f870cdb8", "env:staging", "service:datadog-agent", "rule_id:xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly", "rule_input_type:xccdf", "agent_version:7.48.0-rc.0+git.217.1425a0f"],
+        None,
+        None,
+        None,
+        None::<DogStatsDMsgError>
     );
 
     event_test!(
@@ -584,9 +727,16 @@ mod tests {
 
     #[test]
     fn invalid_statsd_msg() {
-        assert_eq!(
-            DogStatsDMsgError::InvalidMetric("Name or value missing"),
-            DogStatsDStr::new("abcdefghiq").unwrap_err()
-        );
+        let mut found_expected_error = false;
+        match DogStatsDStr::new("abcdefghiq") {
+            Err(e) => match e {
+                DogStatsDMsgError::ParseError { kind, .. } => {
+                    found_expected_error = kind == DogStatsDMsgKind::Metric
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        assert!(found_expected_error);
     }
 }
