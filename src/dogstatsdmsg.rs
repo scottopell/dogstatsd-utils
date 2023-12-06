@@ -452,6 +452,9 @@ impl Debug for DogStatsDMsg {
 
 #[cfg(test)]
 mod tests {
+    use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
+    use rand::{rngs::SmallRng, SeedableRng};
+
     use super::*;
 
     macro_rules! metric_test {
@@ -824,6 +827,118 @@ mod tests {
         };
         assert_eq!(msg.title, "ab");
         assert_eq!(msg.text, "cdef");
+    }
+
+    #[test]
+    fn lading_test() {
+        let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+        let dd = dogstatsd::DogStatsD::new(
+            // Contexts
+            dogstatsd::ConfRange::Inclusive {
+                min: 500,
+                max: 10000,
+            },
+            // Service check name length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // name length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // tag_key_length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // tag_value_length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // tags_per_msg
+            dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
+            // multivalue_count
+            dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
+            // multivalue_pack_probability
+            0.08,
+            dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+            // multivalue_pack_probability
+            0.50,
+            KindWeights::default(),
+            MetricWeights::default(),
+            ValueConf::default(),
+            &mut rng,
+        )
+        .expect("Failed to create dogstatsd generator");
+
+        for _ in 0..100_000_000 {
+            let lading_msg = dd.generate(&mut rng);
+            let str_lading_msg = format!("{}", lading_msg);
+            let msg = DogStatsDStr::new(str_lading_msg.as_str()).unwrap();
+            match lading_msg {
+                dogstatsd::Member::Event(e) => match msg {
+                    DogStatsDStr::Metric(_) => panic!("Wrong type"),
+                    DogStatsDStr::Event(e_parsed) => {
+                        assert_eq!(e_parsed.title, e.title);
+                    }
+                    DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                },
+                dogstatsd::Member::ServiceCheck(sc) => {
+                    match msg {
+                        DogStatsDStr::Metric(_) => panic!("Wrong type"),
+                        DogStatsDStr::ServiceCheck(sc_parsed) => {
+                            // service check not implemented yet
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    }
+                }
+                dogstatsd::Member::Metric(m) => match m {
+                    lading_payload::dogstatsd::metric::Metric::Count(c) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, c.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Count);
+                            assert_eq!(m_parsed.container_id, c.container_id);
+                            for t in m_parsed.tags {
+                                assert!(c.tags.contains(&t.to_owned()));
+                            }
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Gauge(g) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, g.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Gauge);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Histogram(h) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, h.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Histogram);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Timer(t) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, t.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Timer);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Distribution(d) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, d.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Distribution);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Set(s) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, s.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Set);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                },
+            }
+        }
     }
 
     #[test]
