@@ -41,6 +41,10 @@ harness = false
 name = "dogstatsdmsg"
 harness = false
 
+[[bench]]
+name = "analysis"
+harness = false
+
 [profile.release-with-debug]
 inherits = "release"
 debug = true
