@@ -43,6 +43,8 @@ pub struct DogStatsDEventStr<'a> {
     pub hostname: Option<&'a str>,
     pub priority: Option<&'a str>, // Set to normal or low. Default normal.
     pub alert_type: Option<&'a str>, // Set to error, warning, info, or success. Default info.
+    pub aggregation_key: Option<&'a str>,
+    pub source_type_name: Option<&'a str>,
     pub tags: Vec<&'a str>,
     pub raw_msg: &'a str,
 }
@@ -131,7 +133,7 @@ impl<'a> DogStatsDStr<'a> {
             DogStatsDStr::Metric(_) => DogStatsDMsgKind::Metric,
         }
     }
-    // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
+    // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|k:<AGGREGATION_KEY>|s:<SOURCE_TYPE_NAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
     fn parse_event(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
         let orig_msg = str_msg;
         let str_msg = str_msg.trim_end();
@@ -192,6 +194,8 @@ impl<'a> DogStatsDStr<'a> {
         let mut hostname = None;
         let mut priority = None;
         let mut alert_type = None;
+        let mut aggregation_key = None;
+        let mut source_type_name = None;
         let mut tags = Vec::new();
 
         let post_text_idx = end_lengths_idx + 2 + title_length + text_length + 1;
@@ -210,6 +214,8 @@ impl<'a> DogStatsDStr<'a> {
                     Some('h') => hostname = Some(&part[2..]),
                     Some('p') => priority = Some(&part[2..]),
                     Some('t') => alert_type = Some(&part[2..]),
+                    Some('k') => aggregation_key = Some(&part[2..]),
+                    Some('s') => source_type_name = Some(&part[2..]),
                     Some('#') => tags.extend(part[1..].split(',')),
                     _ => {
                         return Err(DogStatsDMsgError::new_parse_error(
@@ -228,6 +234,8 @@ impl<'a> DogStatsDStr<'a> {
             timestamp,
             hostname,
             priority,
+            source_type_name,
+            aggregation_key,
             alert_type,
             tags,
             raw_msg: orig_msg,
