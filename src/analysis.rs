@@ -1,49 +1,24 @@
 use std::{
     collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet},
-    fmt::Display,
     hash::{BuildHasher, Hasher},
     io::Write,
 };
 
 use histo::Histogram;
 
-use crate::{dogstatsdmsg::DogStatsDStr, dogstatsdreader::DogStatsDReader};
+use crate::{
+    dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsgKind, DogStatsDStr},
+    dogstatsdreader::DogStatsDReader,
+};
 
 const DEFAULT_NUM_BUCKETS: u64 = 10;
-
-#[derive(Hash, PartialEq, Eq)]
-pub enum Kind {
-    Count,
-    Distribution,
-    Gauge,
-    Timer,
-    Histogram,
-    Set,
-    ServiceCheck,
-    Event,
-}
-
-impl Display for Kind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Kind::Count => write!(f, "Count"),
-            Kind::Distribution => write!(f, "Distribution"),
-            Kind::Gauge => write!(f, "Gauge"),
-            Kind::Timer => write!(f, "Timer"),
-            Kind::Histogram => write!(f, "Histogram"),
-            Kind::Set => write!(f, "Set"),
-            Kind::ServiceCheck => write!(f, "ServiceCheck"),
-            Kind::Event => write!(f, "Event"),
-        }
-    }
-}
 
 pub struct DogStatsDBatchStats {
     pub name_length: Histogram,
     pub num_values: Histogram,
     pub num_tags: Histogram,
     pub num_unicode_tags: Histogram,
-    pub kind: HashMap<Kind, u32>,
+    pub kind: HashMap<DogStatsDMsgKind, (u32, Option<HashMap<DogStatsDMetricType, u32>>)>,
     pub num_contexts: u32,
     pub total_unique_tags: u32,
 }
@@ -76,13 +51,21 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         num_contexts: 0,
     };
 
-    msg_stats.kind.insert(Kind::Count, 0);
-    msg_stats.kind.insert(Kind::Distribution, 0);
-    msg_stats.kind.insert(Kind::Event, 0);
-    msg_stats.kind.insert(Kind::Gauge, 0);
-    msg_stats.kind.insert(Kind::Histogram, 0);
-    msg_stats.kind.insert(Kind::ServiceCheck, 0);
-    msg_stats.kind.insert(Kind::Set, 0);
+    let mut metric_type_map = HashMap::new();
+    metric_type_map.insert(DogStatsDMetricType::Count, 0);
+    metric_type_map.insert(DogStatsDMetricType::Gauge, 0);
+    metric_type_map.insert(DogStatsDMetricType::Set, 0);
+    metric_type_map.insert(DogStatsDMetricType::Timer, 0);
+    metric_type_map.insert(DogStatsDMetricType::Histogram, 0);
+    metric_type_map.insert(DogStatsDMetricType::Distribution, 0);
+
+    msg_stats.kind.insert(DogStatsDMsgKind::Event, (0, None));
+    msg_stats
+        .kind
+        .insert(DogStatsDMsgKind::ServiceCheck, (0, None));
+    msg_stats
+        .kind
+        .insert(DogStatsDMsgKind::Metric, (0, Some(metric_type_map)));
 
     let mut tags_seen: HashSet<String> = HashSet::new();
     let mut line = String::new();
@@ -96,15 +79,18 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         let metric_msg = match DogStatsDStr::new(&line) {
             Ok(DogStatsDStr::Metric(m)) => m,
             Ok(DogStatsDStr::Event(_)) => {
-                msg_stats.kind.entry(Kind::Event).and_modify(|v| *v += 1);
+                msg_stats
+                    .kind
+                    .entry(DogStatsDMsgKind::Event)
+                    .and_modify(|(v, _)| *v += 1);
                 line.clear();
                 continue;
             }
             Ok(DogStatsDStr::ServiceCheck(_)) => {
                 msg_stats
                     .kind
-                    .entry(Kind::ServiceCheck)
-                    .and_modify(|v| *v += 1);
+                    .entry(DogStatsDMsgKind::ServiceCheck)
+                    .and_modify(|(v, _)| *v += 1);
                 line.clear();
                 continue;
             }
@@ -146,35 +132,17 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
         let context_entry = context_map.entry(metric_context).or_default();
         *context_entry += 1;
 
-        match metric_msg.metric_type {
-            "d" => {
-                msg_stats
-                    .kind
-                    .entry(Kind::Distribution)
-                    .and_modify(|v| *v += 1);
-            }
-            "ms" => {
-                msg_stats.kind.entry(Kind::Timer).and_modify(|v| *v += 1);
-            }
-            "g" => {
-                msg_stats.kind.entry(Kind::Gauge).and_modify(|v| *v += 1);
-            }
-            "c" => {
-                msg_stats.kind.entry(Kind::Count).and_modify(|v| *v += 1);
-            }
-            "s" => {
-                msg_stats.kind.entry(Kind::Set).and_modify(|v| *v += 1);
-            }
-            "h" => {
-                msg_stats
-                    .kind
-                    .entry(Kind::Histogram)
-                    .and_modify(|v| *v += 1);
-            }
-            _ => {
-                println!("Found unknown msg type for dogstatsd msg: {}", line);
-            }
-        }
+        msg_stats
+            .kind
+            .entry(DogStatsDMsgKind::Metric)
+            .and_modify(|(total, per_type)| {
+                *total += 1;
+                if let Some(per_type) = per_type {
+                    per_type
+                        .entry(metric_msg.metric_type)
+                        .and_modify(|v| *v += 1);
+                }
+            });
 
         line.clear();
     }
