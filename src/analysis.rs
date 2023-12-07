@@ -71,7 +71,11 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
     let mut line = String::new();
     let mut context_map: HashMap<u64, u64> = HashMap::new();
     let hash_builder = RandomState::new();
-    while let Ok(num_read) = reader.read_msg(&mut line) {
+    loop {
+        line.clear();
+        let Ok(num_read) = reader.read_msg(&mut line) else {
+            break;
+        };
         if num_read == 0 {
             // EOF
             break;
@@ -83,7 +87,6 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
                     .kind
                     .entry(DogStatsDMsgKind::Event)
                     .and_modify(|(v, _)| *v += 1);
-                line.clear();
                 continue;
             }
             Ok(DogStatsDStr::ServiceCheck(_)) => {
@@ -91,12 +94,10 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
                     .kind
                     .entry(DogStatsDMsgKind::ServiceCheck)
                     .and_modify(|(v, _)| *v += 1);
-                line.clear();
                 continue;
             }
             Err(e) => {
                 println!("Error parsing dogstatsd msg: {}", e);
-                line.clear();
                 continue;
             }
         };
@@ -143,8 +144,6 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
                         .and_modify(|v| *v += 1);
                 }
             });
-
-        line.clear();
     }
 
     msg_stats.total_unique_tags = tags_seen.len() as u32;

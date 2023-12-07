@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
+use smallvec::{smallvec, SmallVec};
 use thiserror::Error;
+
+const MAX_TAGS: usize = 50;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum DogStatsDMsgError {
@@ -65,7 +68,7 @@ pub struct DogStatsDMetricStr<'a> {
     pub timestamp: Option<&'a str>,
     pub container_id: Option<&'a str>,
     pub metric_type: DogStatsDMetricType,
-    pub tags: Vec<&'a str>,
+    pub tags: SmallVec<&'a str, MAX_TAGS>,
     pub raw_msg: &'a str,
 }
 
@@ -281,10 +284,11 @@ impl<'a> DogStatsDStr<'a> {
                     }
                 };
 
-                let tags = match parts.iter().find(|part| part.starts_with('#')) {
-                    Some(tags) => tags[1..].split(',').collect(),
-                    None => vec![],
-                };
+                let tags: SmallVec<&'a str, MAX_TAGS> =
+                    match parts.iter().find(|part| part.starts_with('#')) {
+                        Some(tags) => tags[1..].split(',').collect(),
+                        None => smallvec![],
+                    };
 
                 let timestamp = parts
                     .iter()
@@ -375,7 +379,8 @@ mod tests {
                 assert_eq!(msg.name, $expected_name);
                 assert_eq!(msg.values, $expected_values);
                 assert_eq!(msg.metric_type, $expected_type);
-                assert_eq!(msg.tags, $expected_tags);
+                let expected_tags: SmallVec<&str, MAX_TAGS> = $expected_tags;
+                assert_eq!(msg.tags, expected_tags);
                 assert_eq!(msg.sample_rate, $expected_sample_rate);
                 assert_eq!(msg.timestamp, $expected_timestamp);
                 assert_eq!(msg.container_id, $expected_container_id);
@@ -428,7 +433,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -441,7 +446,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Gauge,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -454,7 +459,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Histogram,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -467,7 +472,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Timer,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -480,7 +485,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Set,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -493,7 +498,7 @@ mod tests {
         "metric.name",
         "1.321",
         DogStatsDMetricType::Gauge,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -506,7 +511,7 @@ mod tests {
         "metric.name",
         "1.321",
         DogStatsDMetricType::Distribution,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -519,7 +524,7 @@ mod tests {
         "metric.name",
         "1.321:1.11111",
         DogStatsDMetricType::Distribution,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -532,7 +537,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         Some("container123"),
@@ -545,7 +550,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        vec!["tag1:value1", "tag2"],
+        smallvec!["tag1:value1", "tag2"],
         Some("0.5"),
         Some("1234567890"),
         Some("container123"),
@@ -558,7 +563,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        vec!["tag1:value1", "tag2"],
+        smallvec!["tag1:value1", "tag2"],
         Some("0.5"),
         Some("1234567890"),
         Some("container123"),
@@ -571,7 +576,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        vec!["tag1:value1", "tag2", "tag3:another"],
+        smallvec!["tag1:value1", "tag2", "tag3:another"],
         None,
         None,
         None,
@@ -584,7 +589,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -597,7 +602,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -610,7 +615,7 @@ mod tests {
         "metric.name",
         "",
         DogStatsDMetricType::Count,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -623,7 +628,7 @@ mod tests {
         "metric.name",
         "1",
         DogStatsDMetricType::Count,
-        Vec::<&str>::new(),
+        smallvec![],
         None,
         None,
         None,
@@ -636,7 +641,7 @@ mod tests {
         "datadog.security_agent.compliance.inputs.duration_ms",
         "19.489043",
         DogStatsDMetricType::Timer,
-        vec!["dd.internal.entity_id:484d54a7-8851-490f-9efa-9fd7f870cdb8", "env:staging", "service:datadog-agent", "rule_id:xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly", "rule_input_type:xccdf", "agent_version:7.48.0-rc.0+git.217.1425a0f"],
+        smallvec!["dd.internal.entity_id:484d54a7-8851-490f-9efa-9fd7f870cdb8", "env:staging", "service:datadog-agent", "rule_id:xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly", "rule_input_type:xccdf", "agent_version:7.48.0-rc.0+git.217.1425a0f"],
         None,
         None,
         None,
