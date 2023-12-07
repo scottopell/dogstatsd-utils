@@ -45,6 +45,10 @@ fn dogstatsdmsg_parsing_throughput(bencher: divan::Bencher) {
         dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
         // multivalue_pack_probability
         0.08,
+        // sample_rate_range
+        dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+        // sample_rate_choose_probability
+        0.50,
         KindWeights::default(),
         MetricWeights::default(),
         ValueConf::default(),
@@ -88,6 +92,10 @@ fn dogstatsdmsg_parsing_metrics_only_throughput(bencher: divan::Bencher) {
         dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
         // multivalue_pack_probability
         0.08,
+        // sample_rate_range
+        dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+        // sample_rate_choose_probability
+        0.50,
         kind_weights,
         MetricWeights::default(),
         ValueConf::default(),
@@ -131,6 +139,10 @@ fn dogstatsdmsg_parsing_events_only_throughput(bencher: divan::Bencher) {
         dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
         // multivalue_pack_probability
         0.08,
+        // sample_rate_range
+        dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+        // sample_rate_choose_probability
+        0.50,
         kind_weights,
         MetricWeights::default(),
         ValueConf::default(),
@@ -174,6 +186,10 @@ fn dogstatsdmsg_parsing_servicechecks_only_throughput(bencher: divan::Bencher) {
         dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
         // multivalue_pack_probability
         0.08,
+        // sample_rate_range
+        dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+        // sample_rate_choose_probability
+        0.50,
         kind_weights,
         MetricWeights::default(),
         ValueConf::default(),

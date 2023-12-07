@@ -25,6 +25,7 @@ lazy_static = "1.4.0"
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"]  }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["smallvec", "fmt", "tracing-log", "std", "env-filter", "json"] }
 divan = "0.1.5"
+smallvec = "2.0.0-alpha.1"
 
 
 [build-dependencies]
@@ -39,6 +40,10 @@ harness = false
 
 [[bench]]
 name = "dogstatsdmsg"
+harness = false
+
+[[bench]]
+name = "analysis"
 harness = false
 
 [profile.release-with-debug]
