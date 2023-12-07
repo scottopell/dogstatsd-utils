@@ -48,7 +48,7 @@ pub struct DogStatsDEventStr<'a> {
     pub alert_type: Option<&'a str>, // Set to error, warning, info, or success. Default info.
     pub aggregation_key: Option<&'a str>,
     pub source_type_name: Option<&'a str>,
-    pub tags: Vec<&'a str>,
+    pub tags: SmallVec<&'a str, MAX_TAGS>,
     pub raw_msg: &'a str,
 }
 
@@ -199,7 +199,7 @@ impl<'a> DogStatsDStr<'a> {
         let mut alert_type = None;
         let mut aggregation_key = None;
         let mut source_type_name = None;
-        let mut tags = Vec::new();
+        let mut tags = smallvec![];
 
         let post_text_idx = end_lengths_idx + 2 + title_length + text_length + 1;
         if post_text_idx < str_msg.len() {
@@ -422,7 +422,8 @@ mod tests {
                 assert_eq!(msg.hostname, $expected_hostname);
                 assert_eq!(msg.priority, $expected_priority);
                 assert_eq!(msg.alert_type, $expected_alert_type);
-                assert_eq!(msg.tags, $expected_tags);
+                let expected_tags: SmallVec<&str, MAX_TAGS> = $expected_tags;
+                assert_eq!(msg.tags, expected_tags);
             }
         };
     }
@@ -657,7 +658,7 @@ mod tests {
         None,
         None,
         None,
-        Vec::<&str>::new(),
+        smallvec![],
         None::<DogStatsDMsgError>
     );
 
@@ -670,7 +671,7 @@ mod tests {
         None,
         None,
         None,
-        Vec::<&str>::new(),
+        smallvec![],
         None::<DogStatsDMsgError>
     );
 
@@ -683,7 +684,7 @@ mod tests {
         None,
         None,
         None,
-        Vec::<&str>::new(),
+        smallvec![],
         None::<DogStatsDMsgError> // This is arguably invalid, but don't care at the moment
     );
 
@@ -696,7 +697,7 @@ mod tests {
         Some("myhost"),
         Some("high"),
         Some("severe"),
-        vec!["env:prod", "onfire:true"],
+        smallvec!["env:prod", "onfire:true"],
         None::<DogStatsDMsgError>
     );
 
@@ -709,7 +710,7 @@ mod tests {
         None,
         None,
         None,
-        Vec::<&str>::new(),
+        smallvec![],
         Some(DogStatsDMsgError::InvalidEvent)
     );
 
