@@ -13,19 +13,15 @@ pub enum DogStatsDMsgError {
         reason: &'static str,
         raw_msg: String,
     },
-    #[error("Metric parsing error: {0}")]
-    InvalidMetric(&'static str),
-    #[error("Event parsing error: {0}")]
-    InvalidEvent(&'static str),
 }
 
 impl DogStatsDMsgError {
     fn new_parse_error(kind: DogStatsDMsgKind, reason: &'static str, raw_msg: String) -> Self {
-        return Self::ParseError {
+        Self::ParseError {
             kind,
             reason,
             raw_msg,
-        };
+        }
     }
 }
 
@@ -52,11 +48,38 @@ pub struct DogStatsDEventStr<'a> {
     pub raw_msg: &'a str,
 }
 
+// Status: An integer corresponding to the check status (OK = 0, WARNING = 1, CRITICAL = 2, UNKNOWN = 3).
+#[derive(Debug, PartialEq)]
+pub enum ServiceCheckStatus {
+    Ok = 0,
+    Warning = 1,
+    Critical = 2,
+    Unknown = 3,
+}
+
+impl TryFrom<&str> for ServiceCheckStatus {
+    type Error = ();
+
+    fn try_from(s: &str) -> Result<Self, ()> {
+        match s {
+            "0" => Ok(ServiceCheckStatus::Ok),
+            "1" => Ok(ServiceCheckStatus::Warning),
+            "2" => Ok(ServiceCheckStatus::Critical),
+            "3" => Ok(ServiceCheckStatus::Unknown),
+            _ => Err(())
+        }
+    }
+}
+
 // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
 #[derive(Debug)]
 pub struct DogStatsDServiceCheckStr<'a> {
     pub name: &'a str,
-    pub status: &'a str,
+    pub status: ServiceCheckStatus,
+    pub timestamp: Option<&'a str>,
+    pub hostname: Option<&'a str>,
+    pub message: Option<&'a str>,
+    pub tags: SmallVec<&'a str, MAX_TAGS>,
     pub raw_msg: &'a str,
 }
 
@@ -100,7 +123,7 @@ impl Display for DogStatsDMsgKind {
 }
 
 impl DogStatsDMetricType {
-    fn from_str(s: &str) -> Result<Self, DogStatsDMsgError> {
+    fn from_str(s: &str) -> Result<Self, ()> {
         match s {
             "c" => Ok(DogStatsDMetricType::Count),
             "g" => Ok(DogStatsDMetricType::Gauge),
@@ -108,9 +131,7 @@ impl DogStatsDMetricType {
             "ms" => Ok(DogStatsDMetricType::Timer),
             "s" => Ok(DogStatsDMetricType::Set),
             "d" => Ok(DogStatsDMetricType::Distribution),
-            _ => Err(DogStatsDMsgError::InvalidMetric(
-                "Unknown metric type specified",
-            )),
+            _ => Err(()),
         }
     }
 }
@@ -152,7 +173,7 @@ impl<'a> DogStatsDStr<'a> {
         ))?;
 
         let lengths = &str_msg[start_lengths_idx + 1..end_lengths_idx]
-            .split(",")
+            .split(',')
             .collect::<Vec<&str>>();
         let title_length: usize = lengths[0].parse().map_err(|_e| {
             DogStatsDMsgError::new_parse_error(
@@ -273,7 +294,15 @@ impl<'a> DogStatsDStr<'a> {
                                 str_msg.to_owned(),
                             ));
                         }
-                        DogStatsDMetricType::from_str(s)?
+                        match DogStatsDMetricType::from_str(s) {
+                            Ok(t) => t,
+                            Err(_) => return Err(DogStatsDMsgError::new_parse_error(
+                                DogStatsDMsgKind::Metric,
+                                "Invalid metric type found.",
+                                str_msg.to_owned(),
+                            )),
+                        }
+
                     }
                     None => {
                         return Err(DogStatsDMsgError::new_parse_error(
@@ -322,16 +351,92 @@ impl<'a> DogStatsDStr<'a> {
         }
     }
 
+    // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
+    // Status: An integer corresponding to the check status (OK = 0, WARNING = 1, CRITICAL = 2, UNKNOWN = 3).
+    fn parse_servicecheck(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
+        let raw_msg = str_msg;
+        let str_msg = str_msg.trim_end();
+        let mut fields = str_msg.split('|');
+        // consume prefix
+        match fields.next() {
+            Some(pre) => {
+                if pre != "_sc" {
+                    return Err(DogStatsDMsgError::ParseError {
+                        kind: DogStatsDMsgKind::ServiceCheck,
+                        reason: "Unexpected prefix found for service check",
+                        raw_msg: raw_msg.to_owned(),
+                    });
+                }
+            }
+            None => {
+                return Err(DogStatsDMsgError::ParseError {
+                    kind: DogStatsDMsgKind::ServiceCheck,
+                    reason: "Not enough fields in msg",
+                    raw_msg: raw_msg.to_owned(),
+                })
+            }
+        }
+        let name = match fields.next() {
+            Some(name) => name,
+            None => {
+                    return Err(DogStatsDMsgError::new_parse_error(
+                        DogStatsDMsgKind::ServiceCheck,
+                        "Not enough fields, couldn't find name",
+                        raw_msg.to_owned(),
+                    ))
+            }
+        };
+
+        let status = match fields.next() {
+            Some(status) => match ServiceCheckStatus::try_from(status) {
+                Ok(s) => s,
+                Err(_) => return Err(DogStatsDMsgError::new_parse_error(DogStatsDMsgKind::ServiceCheck, "Invalid status found.", raw_msg.to_owned())),
+            },
+            None => 
+                    return Err(DogStatsDMsgError::new_parse_error(
+                        DogStatsDMsgKind::ServiceCheck,
+                        "Not enough fields, couldn't find status",
+                        raw_msg.to_owned(),
+                    ))
+        };
+
+        let mut timestamp = None;
+        let mut hostname = None;
+        let mut message = None;
+        let mut tags = smallvec![];
+        for field in fields {
+            match field.chars().next() {
+                Some('d') => timestamp = Some(&field[2..]),
+                Some('h') => hostname = Some(&field[2..]),
+                Some('m') => message = Some(&field[2..]),
+                Some('#') => tags.extend(field[1..].split(',')),
+                _ => {
+                    return Err(DogStatsDMsgError::new_parse_error(
+                        DogStatsDMsgKind::ServiceCheck,
+                        "Unknown servicecheck field value found",
+                        raw_msg.to_owned(),
+                    ));
+                }
+            }
+        }
+
+        Ok(DogStatsDStr::ServiceCheck(DogStatsDServiceCheckStr {
+            raw_msg,
+            name,
+            tags,
+            status,
+            timestamp,
+            hostname,
+            message,
+        }))
+    }
+
     pub fn new(str_msg: &'a str) -> Result<Self, DogStatsDMsgError> {
         if str_msg.starts_with("_e") {
             return Self::parse_event(str_msg);
         }
         if str_msg.starts_with("_sc") {
-            return Ok(DogStatsDStr::ServiceCheck(DogStatsDServiceCheckStr {
-                name: "placeholder",
-                status: "placeholder_status",
-                raw_msg: str_msg,
-            }));
+            return Self::parse_servicecheck(str_msg);
         }
         Self::parse_metric(str_msg)
     }
@@ -359,22 +464,18 @@ mod tests {
                         panic!("Got service check, expected metric")
                     }
                     Ok(DogStatsDStr::Event(_)) => panic!("Got event, expected metric"),
-                    Err(e) => match $expected_error {
-                        Some(_expected_error) => {
-                            // TODO check if the expected_error is the "same" as 'e'
-                            // expected_error is ideally 'DogStatsDMsgError::InvalidMetric'
-                            // and that should match 'e' if 'e' is _any_ DogStatsDMsgError::InvalidMetric
-                            // ie, should match DogStatsDMsgError::InvalidMetric("foo")
-                            //
-                            // The strings in this error are meant to be human-readable descriptions of the
-                            // specific "invalidation", so I don't want to match the exact same
-                            // phrasing in the test code.
-                            return;
-                        }
-                        None => panic!("Unexpected error: {}", e),
+                    Err(e) => {
+                        let Some((expected_error_kind, expected_error_message)) = $expected_error else {
+                            panic!("Got an error but did not expect one {}", e);
+                        };
+                        let expected_error = DogStatsDMsgError::new_parse_error(expected_error_kind, expected_error_message, $input.to_owned());
+                        assert_eq!(e, expected_error);
+                        return;
                     },
                 };
+
                 assert!($expected_error.is_none());
+
                 assert_eq!(msg.raw_msg, $input);
                 assert_eq!(msg.name, $expected_name);
                 assert_eq!(msg.values, $expected_values);
@@ -400,15 +501,11 @@ mod tests {
                     Ok(DogStatsDStr::Metric(_)) => panic!("Got metric, expected event"),
                     Err(e) => match $expected_error {
                         Some(_expected_error) => {
-                            // TODO check if the expected_error is the "same" as 'e'
-                            // expected_error is ideally 'DogStatsDMsgError::InvalidEvent'
-                            // and that should match 'e' if 'e' is _any_
-                            // DogStatsDMsgError::InvalidEvent
-                            // ie, should match DogStatsDMsgError::InvalidEvent("foo")
-                            //
-                            // The strings in this error are meant to be human-readable descriptions of the
-                            // specific "invalidation", so I don't want to match the exact same
-                            // phrasing in the test code.
+                            let Some((expected_error_kind, expected_error_message)) = $expected_error else {
+                                panic!("Got an error but did not expect one {}", e);
+                            };
+                            let expected_error = DogStatsDMsgError::new_parse_error(expected_error_kind, expected_error_message, $input.to_owned());
+                            assert_eq!(e, expected_error);
                             return;
                         }
                         None => panic!("Unexpected error: {}", e),
@@ -428,6 +525,8 @@ mod tests {
         };
     }
 
+    const NO_ERR: Option::<(DogStatsDMsgKind, &str)> = None::<(DogStatsDMsgKind, &str)>;
+
     metric_test!(
         basic_metric,
         "metric.name:1|c",
@@ -438,7 +537,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -451,7 +550,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -464,7 +563,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -477,7 +576,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -490,7 +589,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -503,7 +602,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -516,7 +615,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -529,7 +628,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -542,7 +641,7 @@ mod tests {
         None,
         None,
         Some("container123"),
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -555,7 +654,7 @@ mod tests {
         Some("0.5"),
         Some("1234567890"),
         Some("container123"),
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -568,7 +667,7 @@ mod tests {
         Some("0.5"),
         Some("1234567890"),
         Some("container123"),
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -581,7 +680,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -594,7 +693,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -607,7 +706,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     metric_test!(
@@ -620,7 +719,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError> // should be an error probably
+        NO_ERR // should be an error probably
     );
 
     metric_test!(
@@ -633,7 +732,7 @@ mod tests {
         None,
         None,
         None,
-        Some(DogStatsDMsgError::InvalidMetric("Name or value missing"))
+        Some((DogStatsDMsgKind::Metric, "Name or value missing"))
     );
 
     metric_test!(
@@ -646,7 +745,7 @@ mod tests {
         None,
         None,
         None,
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     event_test!(
@@ -659,7 +758,7 @@ mod tests {
         None,
         None,
         smallvec![],
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     event_test!(
@@ -672,7 +771,7 @@ mod tests {
         None,
         None,
         smallvec![],
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     event_test!(
@@ -685,7 +784,7 @@ mod tests {
         None,
         None,
         smallvec![],
-        None::<DogStatsDMsgError> // This is arguably invalid, but don't care at the moment
+        NO_ERR // This is arguably invalid, but don't care at the moment
     );
 
     event_test!(
@@ -698,7 +797,7 @@ mod tests {
         Some("high"),
         Some("severe"),
         smallvec!["env:prod", "onfire:true"],
-        None::<DogStatsDMsgError>
+        NO_ERR
     );
 
     event_test!(
@@ -711,32 +810,36 @@ mod tests {
         None,
         None,
         smallvec![],
-        Some(DogStatsDMsgError::InvalidEvent)
+        Some((DogStatsDMsgKind::Event, "Title length specified is longer than msg length"))
     );
 
     #[test]
     fn basic_events() {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         let raw_msg = "_e{2,4}:ab|cdef|d:160|h:myhost|p:high|t:severe|#env:prod,onfire:true\n";
-        match DogStatsDStr::new(raw_msg) {
+        let msg = match DogStatsDStr::new(raw_msg) {
             Ok(DogStatsDStr::Event(m)) => m,
             Err(e) => panic!("Unexpected error: {}", e),
             Ok(_) => panic!("Wrong type"),
         };
-        // Not implemented yet
-        // assert_eq!(msg.title, "ab");
-        // assert_eq!(msg.text, "cdef");
+        assert_eq!(msg.title, "ab");
+        assert_eq!(msg.text, "cdef");
     }
 
     #[test]
     fn basic_service_checks() {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
-        let raw_msg = "_sc:ab|error|d:160|h:myhost|#env:prod,onfire:true|m:mymessage\n";
-        match DogStatsDStr::new(raw_msg) {
+        let raw_msg = "_sc|ab|2|d:160|h:myhost|#env:prod,onfire:true|m:mymessage\n";
+        let msg = match DogStatsDStr::new(raw_msg) {
             Ok(DogStatsDStr::ServiceCheck(m)) => m,
-            _ => panic!("Wrong type"),
+            Ok(_) => panic!("Wrong type"),
+            Err(e) => panic!("Unexpected error {}", e),
         };
-        // No other fields implemented
+        assert_eq!(msg.hostname, Some("myhost"));
+        assert_eq!(msg.timestamp, Some("160"));
+        assert_eq!(msg.message, Some("mymessage"));
+        assert_eq!(msg.name, "ab");
+        assert_eq!(msg.status, ServiceCheckStatus::Critical);
     }
 
     #[test]
