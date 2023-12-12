@@ -76,7 +76,7 @@ impl TryFrom<&str> for EventAlert {
             "warning" => Ok(EventAlert::Warning),
             "info" => Ok(EventAlert::Info),
             "success" => Ok(EventAlert::Success),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -101,7 +101,7 @@ impl TryFrom<&str> for ServiceCheckStatus {
             "1" => Ok(ServiceCheckStatus::Warning),
             "2" => Ok(ServiceCheckStatus::Critical),
             "3" => Ok(ServiceCheckStatus::Unknown),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -272,11 +272,13 @@ impl<'a> DogStatsDStr<'a> {
                     Some('d') => timestamp = Some(&part[2..]),
                     Some('h') => hostname = Some(&part[2..]),
                     Some('p') => priority = Some(&part[2..]),
-                    Some('t') => alert_type = match EventAlert::try_from(&part[2..]) {
+                    Some('t') => {
+                        alert_type = match EventAlert::try_from(&part[2..]) {
                             Ok(parsed_alert_type) => parsed_alert_type,
-                                // consider logging a trace/info level saying "defaulting to alert type"?
+                            // consider logging a trace/info level saying "defaulting to alert type"?
                             Err(_) => EventAlert::Info,
-                    },
+                        }
+                    }
                     Some('k') => aggregation_key = Some(&part[2..]),
                     Some('s') => source_type_name = Some(&part[2..]),
                     Some('#') => tags.extend(part[1..].split(',')),
@@ -335,13 +337,14 @@ impl<'a> DogStatsDStr<'a> {
                         }
                         match DogStatsDMetricType::from_str(s) {
                             Ok(t) => t,
-                            Err(_) => return Err(DogStatsDMsgError::new_parse_error(
-                                DogStatsDMsgKind::Metric,
-                                "Invalid metric type found.",
-                                str_msg.to_owned(),
-                            )),
+                            Err(_) => {
+                                return Err(DogStatsDMsgError::new_parse_error(
+                                    DogStatsDMsgKind::Metric,
+                                    "Invalid metric type found.",
+                                    str_msg.to_owned(),
+                                ))
+                            }
                         }
-
                     }
                     None => {
                         return Err(DogStatsDMsgError::new_parse_error(
@@ -418,25 +421,32 @@ impl<'a> DogStatsDStr<'a> {
         let name = match fields.next() {
             Some(name) => name,
             None => {
-                    return Err(DogStatsDMsgError::new_parse_error(
-                        DogStatsDMsgKind::ServiceCheck,
-                        "Not enough fields, couldn't find name",
-                        raw_msg.to_owned(),
-                    ))
+                return Err(DogStatsDMsgError::new_parse_error(
+                    DogStatsDMsgKind::ServiceCheck,
+                    "Not enough fields, couldn't find name",
+                    raw_msg.to_owned(),
+                ))
             }
         };
 
         let status = match fields.next() {
             Some(status) => match ServiceCheckStatus::try_from(status) {
                 Ok(s) => s,
-                Err(_) => return Err(DogStatsDMsgError::new_parse_error(DogStatsDMsgKind::ServiceCheck, "Invalid status found.", raw_msg.to_owned())),
-            },
-            None => 
+                Err(_) => {
                     return Err(DogStatsDMsgError::new_parse_error(
                         DogStatsDMsgKind::ServiceCheck,
-                        "Not enough fields, couldn't find status",
+                        "Invalid status found.",
                         raw_msg.to_owned(),
                     ))
+                }
+            },
+            None => {
+                return Err(DogStatsDMsgError::new_parse_error(
+                    DogStatsDMsgKind::ServiceCheck,
+                    "Not enough fields, couldn't find status",
+                    raw_msg.to_owned(),
+                ))
+            }
         };
 
         let mut timestamp = None;
@@ -567,7 +577,7 @@ mod tests {
         };
     }
 
-    const NO_ERR: Option::<(DogStatsDMsgKind, &str)> = None::<(DogStatsDMsgKind, &str)>;
+    const NO_ERR: Option<(DogStatsDMsgKind, &str)> = None::<(DogStatsDMsgKind, &str)>;
 
     metric_test!(
         basic_metric,
@@ -852,7 +862,10 @@ mod tests {
         None,
         EventAlert::Info,
         smallvec![],
-        Some((DogStatsDMsgKind::Event, "Title length specified is longer than msg length"))
+        Some((
+            DogStatsDMsgKind::Event,
+            "Title length specified is longer than msg length"
+        ))
     );
 
     #[test]
@@ -901,7 +914,7 @@ mod tests {
         )
         .expect("Failed to create dogstatsd generator");
 
-        for _ in 0..100_000 {
+        for _ in 0..500_000 {
             let lading_msg = dd.generate(&mut rng);
             let str_lading_msg = format!("{}", lading_msg);
             let msg = DogStatsDStr::new(str_lading_msg.as_str()).unwrap();
