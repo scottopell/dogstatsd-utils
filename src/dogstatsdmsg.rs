@@ -3,6 +3,8 @@ use std::fmt::Display;
 use smallvec::{smallvec, SmallVec};
 use thiserror::Error;
 
+use lading_payload::dogstatsd::event::Alert as LadingAlert;
+
 const MAX_TAGS: usize = 50;
 
 #[derive(Error, Debug, PartialEq)]
@@ -41,7 +43,7 @@ pub struct DogStatsDEventStr<'a> {
     pub timestamp: Option<&'a str>,
     pub hostname: Option<&'a str>,
     pub priority: Option<&'a str>, // Set to normal or low. Default normal.
-    pub alert_type: Option<&'a str>, // Set to error, warning, info, or success. Default info.
+    pub alert_type: EventAlert,
     pub aggregation_key: Option<&'a str>,
     pub source_type_name: Option<&'a str>,
     pub tags: SmallVec<&'a str, MAX_TAGS>,
@@ -57,6 +59,39 @@ pub enum ServiceCheckStatus {
     Unknown = 3,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum EventAlert {
+    Error,
+    Warning,
+    Info,
+    Success,
+}
+
+impl TryFrom<&str> for EventAlert {
+    type Error = ();
+
+    fn try_from(s: &str) -> Result<Self, ()> {
+        match s {
+            "error" => Ok(EventAlert::Error),
+            "warning" => Ok(EventAlert::Warning),
+            "info" => Ok(EventAlert::Info),
+            "success" => Ok(EventAlert::Success),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<LadingAlert> for EventAlert {
+    fn from(a: LadingAlert) -> Self {
+        match a {
+            LadingAlert::Error => EventAlert::Error,
+            LadingAlert::Warning => EventAlert::Warning,
+            LadingAlert::Info => EventAlert::Info,
+            LadingAlert::Success => EventAlert::Success,
+        }
+    }
+}
+
 impl TryFrom<&str> for ServiceCheckStatus {
     type Error = ();
 
@@ -66,7 +101,7 @@ impl TryFrom<&str> for ServiceCheckStatus {
             "1" => Ok(ServiceCheckStatus::Warning),
             "2" => Ok(ServiceCheckStatus::Critical),
             "3" => Ok(ServiceCheckStatus::Unknown),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -217,7 +252,7 @@ impl<'a> DogStatsDStr<'a> {
         let mut timestamp = None;
         let mut hostname = None;
         let mut priority = None;
-        let mut alert_type = None;
+        let mut alert_type = EventAlert::Info;
         let mut aggregation_key = None;
         let mut source_type_name = None;
         let mut tags = smallvec![];
@@ -237,7 +272,13 @@ impl<'a> DogStatsDStr<'a> {
                     Some('d') => timestamp = Some(&part[2..]),
                     Some('h') => hostname = Some(&part[2..]),
                     Some('p') => priority = Some(&part[2..]),
-                    Some('t') => alert_type = Some(&part[2..]),
+                    Some('t') => {
+                        alert_type = match EventAlert::try_from(&part[2..]) {
+                            Ok(parsed_alert_type) => parsed_alert_type,
+                            // consider logging a trace/info level saying "defaulting to alert type"?
+                            Err(_) => EventAlert::Info,
+                        }
+                    }
                     Some('k') => aggregation_key = Some(&part[2..]),
                     Some('s') => source_type_name = Some(&part[2..]),
                     Some('#') => tags.extend(part[1..].split(',')),
@@ -296,13 +337,14 @@ impl<'a> DogStatsDStr<'a> {
                         }
                         match DogStatsDMetricType::from_str(s) {
                             Ok(t) => t,
-                            Err(_) => return Err(DogStatsDMsgError::new_parse_error(
-                                DogStatsDMsgKind::Metric,
-                                "Invalid metric type found.",
-                                str_msg.to_owned(),
-                            )),
+                            Err(_) => {
+                                return Err(DogStatsDMsgError::new_parse_error(
+                                    DogStatsDMsgKind::Metric,
+                                    "Invalid metric type found.",
+                                    str_msg.to_owned(),
+                                ))
+                            }
                         }
-
                     }
                     None => {
                         return Err(DogStatsDMsgError::new_parse_error(
@@ -379,25 +421,32 @@ impl<'a> DogStatsDStr<'a> {
         let name = match fields.next() {
             Some(name) => name,
             None => {
-                    return Err(DogStatsDMsgError::new_parse_error(
-                        DogStatsDMsgKind::ServiceCheck,
-                        "Not enough fields, couldn't find name",
-                        raw_msg.to_owned(),
-                    ))
+                return Err(DogStatsDMsgError::new_parse_error(
+                    DogStatsDMsgKind::ServiceCheck,
+                    "Not enough fields, couldn't find name",
+                    raw_msg.to_owned(),
+                ))
             }
         };
 
         let status = match fields.next() {
             Some(status) => match ServiceCheckStatus::try_from(status) {
                 Ok(s) => s,
-                Err(_) => return Err(DogStatsDMsgError::new_parse_error(DogStatsDMsgKind::ServiceCheck, "Invalid status found.", raw_msg.to_owned())),
-            },
-            None => 
+                Err(_) => {
                     return Err(DogStatsDMsgError::new_parse_error(
                         DogStatsDMsgKind::ServiceCheck,
-                        "Not enough fields, couldn't find status",
+                        "Invalid status found.",
                         raw_msg.to_owned(),
                     ))
+                }
+            },
+            None => {
+                return Err(DogStatsDMsgError::new_parse_error(
+                    DogStatsDMsgKind::ServiceCheck,
+                    "Not enough fields, couldn't find status",
+                    raw_msg.to_owned(),
+                ))
+            }
         };
 
         let mut timestamp = None;
@@ -452,6 +501,9 @@ impl Debug for DogStatsDMsg {
 
 #[cfg(test)]
 mod tests {
+    use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
+    use rand::{rngs::SmallRng, SeedableRng};
+
     use super::*;
 
     macro_rules! metric_test {
@@ -525,7 +577,7 @@ mod tests {
         };
     }
 
-    const NO_ERR: Option::<(DogStatsDMsgKind, &str)> = None::<(DogStatsDMsgKind, &str)>;
+    const NO_ERR: Option<(DogStatsDMsgKind, &str)> = None::<(DogStatsDMsgKind, &str)>;
 
     metric_test!(
         basic_metric,
@@ -756,7 +808,7 @@ mod tests {
         None,
         None,
         None,
-        None,
+        EventAlert::Info,
         smallvec![],
         NO_ERR
     );
@@ -769,7 +821,7 @@ mod tests {
         None,
         None,
         None,
-        None,
+        EventAlert::Info,
         smallvec![],
         NO_ERR
     );
@@ -782,20 +834,20 @@ mod tests {
         None,
         None,
         None,
-        None,
+        EventAlert::Info,
         smallvec![],
         NO_ERR // This is arguably invalid, but don't care at the moment
     );
 
     event_test!(
         event_with_basic_fields,
-        "_e{2,4}:ab|cdef|d:160|h:myhost|p:high|t:severe|#env:prod,onfire:true\n",
+        "_e{2,4}:ab|cdef|d:160|h:myhost|p:high|t:error|#env:prod,onfire:true\n",
         "ab",
         "cdef",
         Some("160"),
         Some("myhost"),
         Some("high"),
-        Some("severe"),
+        EventAlert::Error,
         smallvec!["env:prod", "onfire:true"],
         NO_ERR
     );
@@ -808,9 +860,12 @@ mod tests {
         None,
         None,
         None,
-        None,
+        EventAlert::Info,
         smallvec![],
-        Some((DogStatsDMsgKind::Event, "Title length specified is longer than msg length"))
+        Some((
+            DogStatsDMsgKind::Event,
+            "Title length specified is longer than msg length"
+        ))
     );
 
     #[test]
@@ -824,6 +879,147 @@ mod tests {
         };
         assert_eq!(msg.title, "ab");
         assert_eq!(msg.text, "cdef");
+    }
+
+    #[test]
+    fn lading_test() {
+        let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+        let dd = dogstatsd::DogStatsD::new(
+            // Contexts
+            dogstatsd::ConfRange::Inclusive {
+                min: 500,
+                max: 10000,
+            },
+            // Service check name length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // name length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // tag_key_length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // tag_value_length
+            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+            // tags_per_msg
+            dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
+            // multivalue_count
+            dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
+            // multivalue_pack_probability
+            0.08,
+            dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+            // multivalue_pack_probability
+            0.50,
+            KindWeights::default(),
+            MetricWeights::default(),
+            ValueConf::default(),
+            &mut rng,
+        )
+        .expect("Failed to create dogstatsd generator");
+
+        for _ in 0..500_000 {
+            let lading_msg = dd.generate(&mut rng);
+            let str_lading_msg = format!("{}", lading_msg);
+            let msg = DogStatsDStr::new(str_lading_msg.as_str()).unwrap();
+            match lading_msg {
+                dogstatsd::Member::Event(ld_event) => match msg {
+                    DogStatsDStr::Metric(_) => panic!("Wrong type"),
+                    DogStatsDStr::Event(e_parsed) => {
+                        assert_eq!(e_parsed.title, ld_event.title);
+                        assert_eq!(e_parsed.aggregation_key, ld_event.aggregation_key);
+                        assert_eq!(e_parsed.hostname, ld_event.hostname);
+                        assert_eq!(e_parsed.text, ld_event.text);
+                        assert_eq!(e_parsed.source_type_name, ld_event.source_type_name);
+
+                        // todo: Implement to/from
+                        // assert_eq!(e_parsed.priority, ld_event.priority);
+
+                        // todo: Represent timestamp as Option<u32>
+                        // assert_eq!(e_parsed.timestamp, ld_event.timestamp);
+                        if let Some(ld_alert_type) = ld_event.alert_type {
+                            let ld_alert_as_alert: EventAlert = ld_alert_type.into();
+                            assert_eq!(ld_alert_as_alert, e_parsed.alert_type);
+                        } else {
+                            assert_eq!(EventAlert::Info, e_parsed.alert_type);
+                        }
+                    }
+                    DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                },
+                dogstatsd::Member::ServiceCheck(ld_sc) => {
+                    match msg {
+                        DogStatsDStr::Metric(_) => panic!("Wrong type"),
+                        DogStatsDStr::ServiceCheck(sc_parsed) => {
+                            assert_eq!(sc_parsed.name, ld_sc.name);
+                            assert_eq!(sc_parsed.hostname, ld_sc.hostname);
+                            assert_eq!(sc_parsed.message, ld_sc.message);
+                            // todo: Represent our timestamp as option<u32>
+                            // assert_eq!(sc_parsed.timestamp, ld_sc.timestamp_second);
+
+                            // todo: implement into/from
+                            // assert_eq!(sc_parsed.status, sc.status);
+                            if let Some(_ld_sc_tags) = ld_sc.tags {
+                                // todo: implement into/from
+                                // assert_eq!(sc_parsed.tags, ld_sc_tags);
+                            } else {
+                                assert_eq!(sc_parsed.tags.len(), 0);
+                            }
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    }
+                }
+                dogstatsd::Member::Metric(m) => match m {
+                    lading_payload::dogstatsd::metric::Metric::Count(c) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, c.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Count);
+                            assert_eq!(m_parsed.container_id, c.container_id);
+                            for t in m_parsed.tags {
+                                assert!(c.tags.contains(&t.to_owned()));
+                            }
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Gauge(g) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, g.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Gauge);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Histogram(h) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, h.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Histogram);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Timer(t) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, t.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Timer);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Distribution(d) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, d.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Distribution);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                    lading_payload::dogstatsd::metric::Metric::Set(s) => match msg {
+                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDStr::Metric(m_parsed) => {
+                            assert_eq!(m_parsed.name, s.name);
+                            assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Set);
+                        }
+                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                    },
+                },
+            }
+        }
     }
 
     #[test]
@@ -850,7 +1046,6 @@ mod tests {
                 DogStatsDMsgError::ParseError { kind, .. } => {
                     found_expected_error = kind == DogStatsDMsgKind::Metric
                 }
-                _ => {}
             },
             _ => {}
         }

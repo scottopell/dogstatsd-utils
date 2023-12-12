@@ -886,7 +886,7 @@ dependencies = [
 [[package]]
 name = "lading-payload"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/lading.git?branch=main#6e26fc9edef3574c8dc6b9ddb13852f45ea0c2bf"
+source = "git+https://github.com/DataDog/lading.git?branch=main#8eff26e8c9ec98c6fd1d9d2c11c6bd66202bc43f"
 dependencies = [
  "bytes",
  "opentelemetry-proto",
@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "lading-throttle"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/lading.git?branch=main#6e26fc9edef3574c8dc6b9ddb13852f45ea0c2bf"
+source = "git+https://github.com/DataDog/lading.git?branch=main#8eff26e8c9ec98c6fd1d9d2c11c6bd66202bc43f"
 dependencies = [
  "async-trait",
  "metrics",
@@ -1149,7 +1149,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall",
- "smallvec 1.11.2",
+ "smallvec 1.11.1",
  "windows-targets 0.48.5",
 ]
 
@@ -1600,9 +1600,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.11.2"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
+checksum = "942b4a808e05215192e39f4ab80813e599068285906cc91aa64f923db842bd5a"
 
 [[package]]
 name = "smallvec"
@@ -1988,7 +1988,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sharded-slab",
- "smallvec 1.11.2",
+ "smallvec 1.11.1",
  "thread_local",
  "tracing",
  "tracing-core",
