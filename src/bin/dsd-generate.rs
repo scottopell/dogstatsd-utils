@@ -20,7 +20,7 @@ struct Args {
     num_msgs: Option<u32>,
 
     /// Emit this number of unique contexts
-    #[arg(short, long)]
+    #[arg(long)]
     num_contexts: Option<u32>,
 
     /// metric_types is optional and if specified will emit only metrics of the given types
