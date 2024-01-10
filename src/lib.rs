@@ -9,6 +9,8 @@ pub mod rate;
 pub mod replay;
 pub mod utf8dogstatsdreader;
 pub mod zstd;
+pub mod pcapreader;
+pub mod pcapdogstatsdreader;
 
 pub fn init_logging() {
     let env_filter = EnvFilter::builder()

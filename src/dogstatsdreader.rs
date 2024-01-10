@@ -6,13 +6,17 @@ use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
     replay::{ReplayReader, ReplayReaderError},
     utf8dogstatsdreader::Utf8DogStatsDReader,
-    zstd::is_zstd,
+    zstd::is_zstd, pcapdogstatsdreader::{PcapDogStatsDReader, PcapDogStatsDReaderError}, pcapreader::PcapReader,
 };
 
 #[derive(Error, Debug)]
 pub enum DogStatsDReaderError {
-    #[error("No dogstatsd replay found")]
-    NotAReplayFile,
+    #[error("DSD Replay")]
+    Replay(#[from] DogStatsDReplayReaderError),
+    #[error("PCAP")]
+    Pcap(#[from] PcapDogStatsDReaderError),
+    #[error("IO Error")]
+    Io(#[from] std::io::Error),
 }
 
 /*
@@ -26,7 +30,7 @@ pub struct DogStatsDReader {
     // todo this should probably be an enum?
     replay_reader: Option<DogStatsDReplayReader>,
     utf8_reader: Option<Utf8DogStatsDReader>,
-    // pcap_reader: Option<PcapDogStatsDReader>,
+    pcap_reader: Option<PcapDogStatsDReader>,
 }
 
 enum InputType {
@@ -44,22 +48,25 @@ fn input_type_of(header: Bytes) -> InputType {
 
     // is_replay will consume the first 8 bytes, so pass a clone
     match ReplayReader::is_replay(header.clone()) {
-        Ok(()) => InputType::Replay,
+        Ok(()) => return InputType::Replay,
         Err(e) => {
             match e {
                 ReplayReaderError::NotAReplayFile => debug!("Not a replay file."),
                 ReplayReaderError::UnsupportedReplayVersion(v) => debug!("Replay header detected, but unsupported version found: {v:x}."),
             }
-
-            // todo, check for pcap magic bytes
-            // magic_number: used to detect the file format itself and the byte ordering. The writing application writes 0xa1b2c3d4 with it's native byte ordering format into this field. The reading application will read either 0xa1b2c3d4 (identical) or 0xd4c3b2a1 (swapped). If the reading application reads the swapped 0xd4c3b2a1 value, it knows that all the following fields will have to be swapped too.
-            // https://wiki.wireshark.org/Development/LibpcapFileFormat
-
-            // fallback to text, its probably utf8
-
-            InputType::Utf8
         }
     }
+
+    match PcapReader::is_pcap(header.clone()) {
+        Ok(()) => return InputType::Pcap,
+        Err(r) => {
+            debug!("Not a pcap file: {r:?}");
+        }
+    }
+
+    // fallback to text, its probably utf8
+
+    InputType::Utf8
 }
 
 impl DogStatsDReader {
@@ -80,10 +87,16 @@ impl DogStatsDReader {
         }
         match input_type_of(header_bytes) {
             InputType::Pcap => {
-                // TODO: attempt to construct a pcap-reader
-
-                error!("Unimplemented pcap currently, stay tuned...");
-                Self { replay_reader: None, utf8_reader: None, }
+                match PcapDogStatsDReader::new(buf) {
+                    Ok(reader) => Self {
+                        pcap_reader: Some(reader),
+                        utf8_reader: None,
+                        replay_reader: None,
+                    },
+                    Err(e) => {
+                        panic!("Pcap Reader couldn't be created: {e:?}");
+                    }
+                }
             }
             InputType::Replay => {
                 info!("Detected dsd replay file.");
@@ -91,6 +104,7 @@ impl DogStatsDReader {
                     Ok(reader) => Self {
                         replay_reader: Some(reader),
                         utf8_reader: None,
+                        pcap_reader: None,
                     },
                     Err(e) => {
                         match e {
@@ -114,22 +128,23 @@ impl DogStatsDReader {
                 Self {
                     replay_reader: None,
                     utf8_reader: Some(Utf8DogStatsDReader::new(buf)),
+                    pcap_reader: None,
                 }
             }
         }
     }
 
     /// read_msg populates the given String with a dogstatsd message
-    pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
+    /// and returns the number of messages read (currently always 1)
+    pub fn read_msg(&mut self, s: &mut String) -> Result<usize, DogStatsDReaderError> {
         if let Some(ref mut replay) = self.replay_reader {
-            match replay.read_msg(s) {
-                Ok(res) => Ok(res),
-                Err(e) => panic!("Err while reading from replay reader: {}", e),
-            }
+            Ok(replay.read_msg(s)?)
         } else if let Some(ref mut ureader) = self.utf8_reader {
-            ureader.read_msg(s)
+            Ok(ureader.read_msg(s)?)
+        } else if let Some(ref mut pcap_reader) = self.pcap_reader {
+            Ok(pcap_reader.read_msg(s)?)
         } else {
-            panic!("IMPOSSIBLE!");
+            unreachable!()
         }
     }
 }
