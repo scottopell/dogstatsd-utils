@@ -1,9 +1,10 @@
 use bytes::{Buf, Bytes};
 use thiserror::Error;
+use tracing::{error, info, debug};
 
 use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
-    replay::ReplayReader,
+    replay::{ReplayReader, ReplayReaderError},
     utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
@@ -25,6 +26,40 @@ pub struct DogStatsDReader {
     // todo this should probably be an enum?
     replay_reader: Option<DogStatsDReplayReader>,
     utf8_reader: Option<Utf8DogStatsDReader>,
+    // pcap_reader: Option<PcapDogStatsDReader>,
+}
+
+enum InputType {
+    Replay,
+    Pcap,
+    Utf8,
+}
+
+/// Does not consume from header
+fn input_type_of(header: Bytes) -> InputType {
+    assert!(header.len() >= 8);
+
+    // todo improve printout to print 8 hex tuples
+    debug!("8 byte header: {:#x?}", header.slice(0..8));
+
+    // is_replay will consume the first 8 bytes, so pass a clone
+    match ReplayReader::is_replay(header.clone()) {
+        Ok(()) => InputType::Replay,
+        Err(e) => {
+            match e {
+                ReplayReaderError::NotAReplayFile => debug!("Not a replay file."),
+                ReplayReaderError::UnsupportedReplayVersion(v) => debug!("Replay header detected, but unsupported version found: {v:x}."),
+            }
+
+            // todo, check for pcap magic bytes
+            // magic_number: used to detect the file format itself and the byte ordering. The writing application writes 0xa1b2c3d4 with it's native byte ordering format into this field. The reading application will read either 0xa1b2c3d4 (identical) or 0xd4c3b2a1 (swapped). If the reading application reads the swapped 0xd4c3b2a1 value, it knows that all the following fields will have to be swapped too.
+            // https://wiki.wireshark.org/Development/LibpcapFileFormat
+
+            // fallback to text, its probably utf8
+
+            InputType::Utf8
+        }
+    }
 }
 
 impl DogStatsDReader {
@@ -33,31 +68,54 @@ impl DogStatsDReader {
     /// Either sequence can be optionally zstd encoded, it will be automatically
     /// decoded if needed.
     pub fn new(mut buf: Bytes) -> Self {
-        let zstd_header = buf.slice(0..4);
-        if is_zstd(&zstd_header) {
+        let mut header_bytes = buf.slice(0..8);
+        // pass a cheap clone to check if zstd
+        if is_zstd(&header_bytes.slice(0..4)) {
+            info!("Detected zstd compression.");
+            // consume original buffer to completion
             buf = Bytes::from(zstd::decode_all(buf.reader()).unwrap());
+            // buf now points to a new buffer, so grab a new 8 byte slice of
+            // possibly-header from the new decompressed buffer
+            header_bytes = buf.slice(0..8);
         }
+        match input_type_of(header_bytes) {
+            InputType::Pcap => {
+                // TODO: attempt to construct a pcap-reader
 
-        match DogStatsDReplayReader::new(buf.clone()) {
-            Ok(reader) => Self {
-                replay_reader: Some(reader),
-                utf8_reader: None,
-            },
-            Err(e) => match e {
-                DogStatsDReplayReaderError::NotAReplayFile => Self {
+                error!("Unimplemented pcap currently, stay tuned...");
+                Self { replay_reader: None, utf8_reader: None, }
+            }
+            InputType::Replay => {
+                info!("Detected dsd replay file.");
+                match DogStatsDReplayReader::new(buf) {
+                    Ok(reader) => Self {
+                        replay_reader: Some(reader),
+                        utf8_reader: None,
+                    },
+                    Err(e) => {
+                        match e {
+                            DogStatsDReplayReaderError::NotAReplayFile => {
+                                unreachable!()
+                            },
+                            DogStatsDReplayReaderError::UnsupportedReplayVersion(version) => {
+                                panic!("Encountered unsupported replay version. Found {version} but only {:?} are supported", ReplayReader::supported_versions())
+                            }
+                            DogStatsDReplayReaderError::InvalidUtf8Sequence(utf8_err) => {
+                                panic!(
+                                    "Parsed replay file, but encountered invalid UTF-8 in the payload. {utf8_err}",
+                                );
+                            }
+                        };
+                    },
+                }
+            }
+            InputType::Utf8 => {
+                info!("Detected UTF8 text file.");
+                Self {
                     replay_reader: None,
                     utf8_reader: Some(Utf8DogStatsDReader::new(buf)),
-                },
-                DogStatsDReplayReaderError::UnsupportedReplayVersion(e) => {
-                    panic!("Encountered unsupported replay version. Found {} but only {:?} are supported", e, ReplayReader::supported_versions())
                 }
-                DogStatsDReplayReaderError::InvalidUtf8Sequence(e) => {
-                    panic!(
-                        "Parsed replay file, but encountered invalid UTF-8 in the payload. {}",
-                        e
-                    );
-                }
-            },
+            }
         }
     }
 

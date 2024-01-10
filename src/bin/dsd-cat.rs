@@ -11,6 +11,7 @@ use dogstatsd_utils::analysis::print_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
 
 use clap::Parser;
+use dogstatsd_utils::init_logging;
 
 /// Take data from the specified input file and write it either to stdout or to a specified file.
 /// Data can be raw utf-8 text or a dogstatsd-replay file, optionally zstd encoded.
@@ -26,6 +27,7 @@ struct Args {
 }
 
 fn main() -> Result<(), Error> {
+    init_logging();
     let args = Args::parse();
 
     let bytes: Bytes = if let Some(input_file) = args.input {
