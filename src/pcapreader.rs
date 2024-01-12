@@ -1,11 +1,11 @@
 
-use etherparse::SlicedPacket;
+use pnet::packet::Packet;
 use thiserror::Error;
 use bytes::{Buf, Bytes};
-use pcap_file::PcapError as PcapError;
+use pcap_file::{PcapError as PcapError, pcap::PcapHeader};
 use pcap_file::pcap::PcapPacket;
 use bytes::buf::Reader;
-use tracing::{info, error};
+use tracing::{info, error, debug};
 
 // The writing application writes 0xa1b2c3d4 with it's native byte
 // ordering format into this field.
@@ -21,6 +21,7 @@ const PCAP_HEADER_SWAPPED: &[u8] = &[0xd4, 0xc3, 0xb2, 0xa1,];
 #[derive(Debug)]
 pub struct PcapReader {
     reader: pcap_file::pcap::PcapReader<Reader<Bytes>>,
+    pub header: pcap_file::pcap::PcapHeader,
 }
 
 #[derive(Error, Debug)]
@@ -29,40 +30,10 @@ pub enum PcapReaderError {
     BadHeader(String),
     #[error("PCAP Error: {0}")]
     Pcap(#[from] PcapError),
+    #[error("Unsupported datalink type: {0:?}")]
+    UnsupportedDatalinkType(pcap_file::DataLink),
 }
 
-fn _payload_from_pcap(packet: SlicedPacket) -> Bytes {
-    if let Some(ethertype) = packet.payload_ether_type() {
-        match etherparse::SlicedPacket::from_ether_type(ethertype, packet.payload) {
-            Ok(value) => {
-                info!("Found nested packet with ethertype: {ethertype}. Recursing into it.");
-                return _payload_from_pcap(value);
-            }
-            Err(e) => {
-                error!("Failed to parse payload from ethertype ({ethertype}): {e:?}");
-            }
-        }
-    } else {
-        info!("Packet does not contain a nested packet, testing below for relevant fields");
-    }
-    if let Some(link) = packet.link {
-        info!("Link: {:?}", link);
-    }
-    if let Some(vlan) = packet.vlan {
-        info!("vlan: {:?}", vlan)
-    }
-    if let Some(ip) = packet.ip {
-        info!("ip: {:?}", ip)
-    }
-    if let Some(transport) = packet.transport {
-        // could be Some(Udp(_))
-        info!("transport: {:?}", transport);
-
-        return Bytes::copy_from_slice(packet.payload);
-    }
-
-    Bytes::copy_from_slice(packet.payload)
-}
 impl PcapReader {
 
     // Advances header 4 bytes
@@ -79,23 +50,62 @@ impl PcapReader {
     /// This function takes a pcap packet and attempts to unwrap it into a UDP packet
     /// If this is possible, it will return the byte payload of the udp packet.
     /// otherwise this will return None.
-    pub fn get_udp_payload_from_packet(packet: PcapPacket) -> Result<Option<Bytes>, PcapReaderError> {
+    pub fn get_udp_payload_from_packet(packet: PcapPacket, header: PcapHeader) -> Result<Option<Bytes>, PcapReaderError> {
         let data = packet.data;
-        // packet.data contains a frame
-        // we need to find the udp packet within that frame
-        // from pcap files captured on the 'any' interface,
-        // we get SLL frames, "Linux Cooked Mode v2"
-        // etherparse doesn't appear to support this.
-        // I found this crate which appears to, but it is fairly low-level
-        // https://docs.rs/pnet/latest/pnet/packet/sll2/struct.SLL2Packet.html
+        // data will be interpreted according to the datalink type
+        // specified in the pcap header
 
-        info!("Attempting to read UDP packet out of raw PCAP packet (len: {})", data.len());
-        // todo is this an ethernet packet or SLL?
-        // I suspect those will be the two main cases
-        // Ideally I can find some lib that generically finds the right packet given the bytes
+        debug!("Attempting to read UDP packet out of raw PCAP packet (len: {})", data.len());
 
-
-
+        match header.datalink {
+            pcap_file::DataLink::ETHERNET => {
+                let ethernet_packet = pnet::packet::ethernet::EthernetPacket::new(&data);
+                debug!("Ethernet packet: {:?}", ethernet_packet);
+                // handle this case, likely refactor using below logic
+                todo!()
+            }
+            pcap_file::DataLink::LINUX_SLL2 => {
+                let sllv2_packet = pnet::packet::sll2::SLL2Packet::new(&data).expect("Pcap header claimed sll2 packets, but parsing failed.");
+                debug!("SLLv2 packet: {:?} with protocol type: {}", sllv2_packet, sllv2_packet.get_protocol_type());
+                match sllv2_packet.get_protocol_type() {
+                    pnet::packet::ethernet::EtherTypes::Ipv4 => {
+                        let ipv4_packet = pnet::packet::ipv4::Ipv4Packet::new(sllv2_packet.payload());
+                        debug!("IPv4 packet: {:?}", ipv4_packet);
+                        match ipv4_packet {
+                            Some(ipv4_packet) => {
+                                match ipv4_packet.get_next_level_protocol() {
+                                    pnet::packet::ip::IpNextHeaderProtocols::Udp => {
+                                        let udp_packet = pnet::packet::udp::UdpPacket::new(ipv4_packet.payload());
+                                        debug!("UDP packet: {:?}", udp_packet);
+                                        match udp_packet {
+                                            Some(udp_packet) => {
+                                                return Ok(Some(Bytes::copy_from_slice(udp_packet.payload())));
+                                            }
+                                            None => {
+                                                error!("Failed to parse UDP packet from IPv4 packet");
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        error!("Unsupported protocol found in IPv4 packet: {:?}", ipv4_packet.get_next_level_protocol());
+                                    }
+                                }
+                            }
+                            None => {
+                                error!("Failed to parse IPv4 packet from SLLv2 packet");
+                            }
+                        }
+                    },
+                    _ => {
+                        // todo - ipv6
+                        error!("Unsupported protocol found in SLLv2 packet: {}", sllv2_packet.get_protocol_type());
+                    }
+                }
+            }
+            _ => {
+                unreachable!("Unsupported datalink type found, this should have been caught during construction.");
+            }
+        }
 
         Ok(Some(Bytes::copy_from_slice(&data)))
     }
@@ -115,15 +125,31 @@ impl PcapReader {
 
     pub fn new(buf: Bytes) -> Result<Self, PcapReaderError> {
         let reader = pcap_file::pcap::PcapReader::new(buf.reader())?;
+        let header = reader.header();
+        match header.datalink {
+            pcap_file::DataLink::ETHERNET => {
+                info!("Datalink: Ethernet");
+            }
+            pcap_file::DataLink::LINUX_SLL2 => {
+                info!("Datalink: Linux Cooked Mode v2");
+            }
+            _ => {
+                error!("Unsupported datalink type in pcap file: {:?}", header.datalink);
+                return Err(PcapReaderError::UnsupportedDatalinkType(header.datalink));
+            }
+        }
 
         Ok(Self {
-            reader
+            reader,
+            header,
         })
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::init_logging;
+
     use super::*;
 
     // all of my current pcap files were created using this tcpdump invocation
@@ -163,9 +189,12 @@ mod test {
 
     #[test]
     fn can_read_udp_from_sll2_packet() {
+        init_logging();
+
         let mut reader = PcapReader::new(Bytes::from_static(PCAP_SLLV2_SINGLE_UDP_PACKET)).unwrap();
+        let header = reader.header;
         let packet = reader.read_packet().unwrap().unwrap();
-        let udp_payload = PcapReader::get_udp_payload_from_packet(packet).unwrap().unwrap();
+        let udp_payload = PcapReader::get_udp_payload_from_packet(packet, header).unwrap().unwrap();
 
         let expected_udp_payload: &[u8] = &[
             0x61, 0x62, 0x63, 0x2e, 0x6d, 0x79, 0x2e, 0x66,

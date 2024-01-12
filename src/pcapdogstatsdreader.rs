@@ -13,8 +13,6 @@ pub enum PcapDogStatsDReaderError {
     PcapReader(PcapReaderError),
     #[error("Invalid UTF-8 sequence found in packet")]
     InvalidUtf8Sequence(Utf8Error),
-    #[error("Ethernet frame parsing error")]
-    Ethernet(#[from] etherparse::ReadError),
 }
 
 pub struct PcapDogStatsDReader {
@@ -38,10 +36,11 @@ impl PcapDogStatsDReader {
             s.insert_str(0, &line);
             return Ok(1);
         }
+        let header = self.pcap_reader.header;
 
         match self.pcap_reader.read_packet() {
             Ok(Some(packet)) => {
-                match PcapReader::get_udp_payload_from_packet(packet) {
+                match PcapReader::get_udp_payload_from_packet(packet, header) {
                     Ok(Some(udp_payload)) => {
                         info!("Got a UDP Payload of length {}", udp_payload.len());
                         match std::str::from_utf8(&udp_payload) {
@@ -108,7 +107,10 @@ mod test {
 
         let res = reader.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
-        assert_eq!("statsd.example.time.micros:2.39283|d|@1.000000|#environment:dev|c:2a25f7fc8fbf573d62053d7263dd2d440c07b6ab4d2b107e50b0d4df1f2ee15f", s);
+        assert_eq!("abc.my.fav.metric:1|c|#host:foo", s);
         s.clear();
+
+        let res = reader.read_msg(&mut s).unwrap();
+        assert_eq!(res, 0);
     }
 }
