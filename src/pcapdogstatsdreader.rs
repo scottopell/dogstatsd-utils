@@ -2,7 +2,7 @@ use std::{collections::VecDeque, str::Utf8Error};
 use thiserror::Error;
 
 use bytes::Bytes;
-use tracing::{warn, info, error, debug};
+use tracing::{warn, error, debug};
 
 use crate::pcapreader::{PcapReader, PcapReaderError};
 
@@ -42,7 +42,7 @@ impl PcapDogStatsDReader {
             Ok(Some(packet)) => {
                 match PcapReader::get_udp_payload_from_packet(packet, header) {
                     Ok(Some(udp_payload)) => {
-                        info!("Got a UDP Payload of length {}", udp_payload.len());
+                        debug!("Got a UDP Payload of length {}", udp_payload.len());
                         match std::str::from_utf8(&udp_payload) {
                             Ok(v) => {
                                 if v.is_empty() {

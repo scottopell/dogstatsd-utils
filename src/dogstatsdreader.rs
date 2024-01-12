@@ -35,8 +35,7 @@ enum InputType {
 fn input_type_of(header: Bytes) -> InputType {
     assert!(header.len() >= 8);
 
-    // todo improve printout to print 8 hex tuples
-    debug!("8 byte header: {:#x?}", header.slice(0..8));
+    debug!("8 byte header: {:02x?}", &header.slice(0..8));
 
     // is_replay will consume the first 8 bytes, so pass a clone
     match ReplayReader::is_replay(header.clone()) {
@@ -143,7 +142,7 @@ mod tests {
         0x00, 0x00, 0x00,
     ];
 
-    const PCAP_SINGLE_MESSAGE: &[u8] = &[
+    const PCAP_SLL2_SINGLE_UDP_PACKET: &[u8] = &[
         0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x14, 0x01, 0x00, 0x00,
         0xef, 0xc0, 0x9d, 0x65, 0xb2, 0xbc, 0x0a, 0x00, 0x4f, 0x00, 0x00, 0x00,
@@ -362,7 +361,7 @@ mod tests {
 
     #[test]
     fn pcap_single_message() {
-        let mut reader = DogStatsDReader::new(Bytes::from(PCAP_SINGLE_MESSAGE));
+        let mut reader = DogStatsDReader::new(Bytes::from(PCAP_SLL2_SINGLE_UDP_PACKET));
         let mut s = String::new();
         let res = reader.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
