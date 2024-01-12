@@ -3,7 +3,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use divan::counter::BytesCount;
 use dogstatsd_utils::{
-    analysis::analyze_msgs, dogstatsdmsg::DogStatsDStr, dogstatsdreader::DogStatsDReader,
+    analysis::analyze_msgs, dogstatsdreader::DogStatsDReader,
 };
 use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
 use rand::{rngs::SmallRng, SeedableRng};
@@ -16,6 +16,7 @@ fn main() {
 #[divan::bench(min_time = Duration::from_secs(10))]
 fn analysis_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+    let length_prefix_framed = false;
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
         dogstatsd::ConfRange::Inclusive {
@@ -43,6 +44,7 @@ fn analysis_throughput(bencher: divan::Bencher) {
         KindWeights::default(),
         MetricWeights::default(),
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");

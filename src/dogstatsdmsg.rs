@@ -884,6 +884,7 @@ mod tests {
     #[test]
     fn lading_test() {
         let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+        let length_prefix_framed = false;
         let dd = dogstatsd::DogStatsD::new(
             // Contexts
             dogstatsd::ConfRange::Inclusive {
@@ -910,6 +911,7 @@ mod tests {
             KindWeights::default(),
             MetricWeights::default(),
             ValueConf::default(),
+            length_prefix_framed,
             &mut rng,
         )
         .expect("Failed to create dogstatsd generator");
@@ -1041,13 +1043,8 @@ mod tests {
     #[test]
     fn invalid_statsd_msg() {
         let mut found_expected_error = false;
-        match DogStatsDStr::new("abcdefghiq") {
-            Err(e) => match e {
-                DogStatsDMsgError::ParseError { kind, .. } => {
-                    found_expected_error = kind == DogStatsDMsgKind::Metric
-                }
-            },
-            _ => {}
+        if let Err(DogStatsDMsgError::ParseError { kind, .. } ) = DogStatsDStr::new("abcdefghiq") {
+            found_expected_error = kind == DogStatsDMsgKind::Metric
         }
         assert!(found_expected_error);
     }

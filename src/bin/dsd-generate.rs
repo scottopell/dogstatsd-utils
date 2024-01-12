@@ -112,6 +112,7 @@ async fn main() -> Result<(), DSDGenerateError> {
         Some(num_contexts) => dogstatsd::ConfRange::Constant(num_contexts),
         None => dogstatsd::ConfRange::Inclusive { min: 100, max: 500 },
     };
+    let length_prefix_framed = false;
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
         context_range,
@@ -136,6 +137,7 @@ async fn main() -> Result<(), DSDGenerateError> {
         KindWeights::default(),
         metric_weights,
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");

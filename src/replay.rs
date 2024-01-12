@@ -171,7 +171,7 @@ mod tests {
 
         for (i, &code) in hex_codes.iter().enumerate() {
             // Check if the code is in printable ASCII range
-            if code >= 0x20 && code <= 0x7E {
+            if (0x20..=0x7E).contains(&code) {
                 result.push_str(&format!("b'{}'", code as char));
             } else {
                 result.push_str(&format!("0x{:02X}", code));

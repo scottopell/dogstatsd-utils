@@ -923,7 +923,7 @@ dependencies = [
 [[package]]
 name = "lading-payload"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/lading.git?branch=main#8eff26e8c9ec98c6fd1d9d2c11c6bd66202bc43f"
+source = "git+https://github.com/DataDog/lading.git?tag=v0.20.5#68b3d375af4bf072ea0ce2c9f4683f39102916d5"
 dependencies = [
  "bytes",
  "opentelemetry-proto",
@@ -943,7 +943,7 @@ dependencies = [
 [[package]]
 name = "lading-throttle"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/lading.git?branch=main#8eff26e8c9ec98c6fd1d9d2c11c6bd66202bc43f"
+source = "git+https://github.com/DataDog/lading.git?tag=v0.20.5#68b3d375af4bf072ea0ce2c9f4683f39102916d5"
 dependencies = [
  "async-trait",
  "metrics",

@@ -83,7 +83,7 @@ mod test {
 
     #[test]
     fn can_detect_pcap() {
-        assert_eq!(PcapReader::is_pcap(Bytes::from_static(PCAP_SINGLE_MESSAGE)).unwrap(), ());
+        PcapReader::is_pcap(Bytes::from_static(PCAP_SINGLE_MESSAGE)).unwrap();
     }
 
     #[test]
