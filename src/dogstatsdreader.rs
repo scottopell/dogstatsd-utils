@@ -19,18 +19,10 @@ pub enum DogStatsDReaderError {
     Io(#[from] std::io::Error),
 }
 
-/*
 pub enum DogStatsDReader {
-    ReplayReader(DogStatsDReplay),
-    Utf8Reader(Utf8DogStatsDReader),
-}
-*/
-
-pub struct DogStatsDReader {
-    // todo this should probably be an enum?
-    replay_reader: Option<DogStatsDReplayReader>,
-    utf8_reader: Option<Utf8DogStatsDReader>,
-    pcap_reader: Option<PcapDogStatsDReader>,
+    Replay(DogStatsDReplayReader),
+    Utf8(Utf8DogStatsDReader),
+    Pcap(PcapDogStatsDReader),
 }
 
 enum InputType {
@@ -87,49 +79,26 @@ impl DogStatsDReader {
         }
         match input_type_of(header_bytes) {
             InputType::Pcap => {
+                info!("Treating input as pcap");
                 match PcapDogStatsDReader::new(buf) {
-                    Ok(reader) => Self {
-                        pcap_reader: Some(reader),
-                        utf8_reader: None,
-                        replay_reader: None,
-                    },
+                    Ok(reader) => Self::Pcap(reader),
                     Err(e) => {
                         panic!("Pcap Reader couldn't be created: {e:?}");
                     }
                 }
             }
             InputType::Replay => {
-                info!("Detected dsd replay file.");
+                info!("Treating input as dogstatsd-replay");
                 match DogStatsDReplayReader::new(buf) {
-                    Ok(reader) => Self {
-                        replay_reader: Some(reader),
-                        utf8_reader: None,
-                        pcap_reader: None,
-                    },
+                    Ok(reader) => Self::Replay(reader),
                     Err(e) => {
-                        match e {
-                            DogStatsDReplayReaderError::NotAReplayFile => {
-                                unreachable!()
-                            },
-                            DogStatsDReplayReaderError::UnsupportedReplayVersion(version) => {
-                                panic!("Encountered unsupported replay version. Found {version} but only {:?} are supported", ReplayReader::supported_versions())
-                            }
-                            DogStatsDReplayReaderError::InvalidUtf8Sequence(utf8_err) => {
-                                panic!(
-                                    "Parsed replay file, but encountered invalid UTF-8 in the payload. {utf8_err}",
-                                );
-                            }
-                        };
+                        panic!("Replay reader couldn't be created: {e:?}");
                     },
                 }
             }
             InputType::Utf8 => {
-                info!("Detected UTF8 text file.");
-                Self {
-                    replay_reader: None,
-                    utf8_reader: Some(Utf8DogStatsDReader::new(buf)),
-                    pcap_reader: None,
-                }
+                info!("Treating input as utf8");
+                Self::Utf8(Utf8DogStatsDReader::new(buf))
             }
         }
     }
@@ -137,14 +106,10 @@ impl DogStatsDReader {
     /// read_msg populates the given String with a dogstatsd message
     /// and returns the number of messages read (currently always 1)
     pub fn read_msg(&mut self, s: &mut String) -> Result<usize, DogStatsDReaderError> {
-        if let Some(ref mut replay) = self.replay_reader {
-            Ok(replay.read_msg(s)?)
-        } else if let Some(ref mut ureader) = self.utf8_reader {
-            Ok(ureader.read_msg(s)?)
-        } else if let Some(ref mut pcap_reader) = self.pcap_reader {
-            Ok(pcap_reader.read_msg(s)?)
-        } else {
-            unreachable!()
+        match self {
+            Self::Utf8(r) => Ok(r.read_msg(s)?),
+            Self::Replay(r) => Ok(r.read_msg(s)?),
+            Self::Pcap(r) => Ok(r.read_msg(s)?),
         }
     }
 }

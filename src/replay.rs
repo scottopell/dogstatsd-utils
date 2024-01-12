@@ -95,7 +95,7 @@ impl ReplayReader {
             return Err(ReplayReaderError::UnsupportedReplayVersion(version));
         }
         header.advance(3); // consume next 3 bytes per contract
-        return Ok(())
+        Ok(())
     }
 
     // consumes 8 bytes during construction, even if construction fails

@@ -1,9 +1,9 @@
 use std::{collections::VecDeque, str::Utf8Error};
-use pcap_file::pcap;
+use etherparse::SlicedPacket;
 use thiserror::Error;
 
 use bytes::Bytes;
-use tracing::{warn, info};
+use tracing::{warn, info, error};
 
 use crate::pcapreader::{PcapReader, PcapReaderError};
 
@@ -11,14 +11,49 @@ use crate::pcapreader::{PcapReader, PcapReaderError};
 #[derive(Error, Debug)]
 pub enum PcapDogStatsDReaderError {
     #[error("Error from pcap reader")]
-    PcapReaderError(PcapReaderError),
+    PcapReader(PcapReaderError),
     #[error("Invalid UTF-8 sequence found in packet")]
     InvalidUtf8Sequence(Utf8Error),
+    #[error("Ethernet frame parsing error")]
+    Ethernet(#[from] etherparse::ReadError),
 }
 
 pub struct PcapDogStatsDReader {
     pcap_reader: PcapReader,
     current_messages: VecDeque<String>,
+}
+
+fn payload_from_pcap(packet: SlicedPacket) -> Bytes {
+    if let Some(ethertype) = packet.payload_ether_type() {
+        match etherparse::SlicedPacket::from_ether_type(ethertype, packet.payload) {
+            Ok(value) => {
+                info!("Found nested packet with ethertype: {ethertype}. Recursing into it.");
+                return payload_from_pcap(value);
+            }
+            Err(e) => {
+                error!("Failed to parse payload from ethertype ({ethertype}): {e:?}");
+            }
+        }
+    } else {
+        info!("Packet does not contain a nested packet, testing below for relevant fields");
+    }
+    if let Some(link) = packet.link {
+        info!("Link: {:?}", link);
+    }
+    if let Some(vlan) = packet.vlan {
+        info!("vlan: {:?}", vlan)
+    }
+    if let Some(ip) = packet.ip {
+        info!("ip: {:?}", ip)
+    }
+    if let Some(transport) = packet.transport {
+        // could be Some(Udp(_))
+        info!("transport: {:?}", transport);
+
+        return Bytes::copy_from_slice(packet.payload);
+    }
+
+    Bytes::copy_from_slice(packet.payload)
 }
 
 impl PcapDogStatsDReader {
@@ -28,7 +63,7 @@ impl PcapDogStatsDReader {
                 pcap_reader: reader,
                 current_messages: VecDeque::new(),
             }),
-            Err(e) => Err(PcapDogStatsDReaderError::PcapReaderError(e)),
+            Err(e) => Err(PcapDogStatsDReaderError::PcapReader(e)),
         }
     }
     pub fn read_msg(&mut self, s: &mut String) -> Result<usize, PcapDogStatsDReaderError> {
@@ -39,12 +74,22 @@ impl PcapDogStatsDReader {
 
         match self.pcap_reader.read_packet() {
             Ok(Some(packet)) => {
-                // todo, what do I want to do with this packet?
-                // packet.data contains the full IP frame
-                // I need to interpret this as UDP and read out the data field
+                // packet.data contains the full ethernet frame
+                // so lets try to find the udp packets within
 
-                info!("Got raw PCAP packet of length: {}\n{:#?}", packet.data.len(), &packet.data);
-                match std::str::from_utf8(&packet.data) {
+                info!("Got raw PCAP packet of length: {}", packet.data.len());
+                let data: Bytes = match etherparse::SlicedPacket::from_ethernet(&packet.data) {
+                    Ok(value) => {
+                        payload_from_pcap(value)
+                    }
+                    Err(e) => {
+                        warn!("Couldn't parse packet from pcap as IP: {e}");
+                        return Err(PcapDogStatsDReaderError::Ethernet(e));
+                    }
+                };
+
+                info!("Parsed out what I hope is a payload: {data:?}");
+                match std::str::from_utf8(&data) {
                     Ok(v) => {
                         if v.is_empty() {
                             // Read operation was successful, read 0 msgs
@@ -63,7 +108,7 @@ impl PcapDogStatsDReader {
             Ok(None) => Ok(0), // Read was validly issued, just nothing to be read.
             Err(e) => {
                 warn!("Error while trying to read a packet: {e}");
-                Err(PcapDogStatsDReaderError::PcapReaderError(e))
+                Err(PcapDogStatsDReaderError::PcapReader(e))
             }
         }
     }
@@ -95,6 +140,7 @@ mod test {
         let mut reader = PcapDogStatsDReader::new(Bytes::from_static(PCAP_SINGLE_MESSAGE)).unwrap();
 
         let mut s = String::new();
+
         let res = reader.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
         assert_eq!("statsd.example.time.micros:2.39283|d|@1.000000|#environment:dev|c:2a25f7fc8fbf573d62053d7263dd2d440c07b6ab4d2b107e50b0d4df1f2ee15f", s);

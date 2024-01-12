@@ -27,6 +27,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 divan = "0.1.5"
 smallvec = "2.0.0-alpha.1"
 pcap-file = "2.0.0-rc1"
+etherparse = "0.13"
 
 
 

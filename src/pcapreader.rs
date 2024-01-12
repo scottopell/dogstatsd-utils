@@ -23,36 +23,31 @@ pub struct PcapReader {
 
 #[derive(Error, Debug)]
 pub enum PcapReaderError {
-    #[error("Generic Error: {0}")]
-    Generic(String),
+    #[error("Unrecognized Header")]
+    BadHeader(String),
     #[error("PCAP Error: {0}")]
     Pcap(#[from] PcapError),
 }
 
-#[derive(Debug)]
-pub enum Reason {
-    UnrecognizedHeader(String)
-}
 
 impl PcapReader {
 
     // Advances header 4 bytes
-    pub fn is_pcap(mut header: Bytes) -> Result<(), Reason> {
+    pub fn is_pcap(mut header: Bytes) -> Result<(), PcapReaderError> {
         let first_four = header.slice(0..4);
         header.advance(4);
+        // todo pcap_file has a more comprehensive check
         if first_four != PCAP_HEADER && first_four != PCAP_HEADER_SWAPPED {
-            return Err(Reason::UnrecognizedHeader(format!("first four: {first_four:#?}")));
+            return Err(PcapReaderError::BadHeader(format!("first four: {first_four:#?}")));
         }
-        return Ok(())
+        Ok(())
     }
 
     pub fn read_packet(&mut self) -> Result<Option<PcapPacket>, PcapReaderError> {
-        // this is a bit silly, but Result<Option<Packet>> makes much more sense to me
-        // than Option<Result<Packet>>.
         match self.reader.next_packet() {
             Some(Ok(p)) => Ok(Some(p)),
             Some(Err(e)) => Err(PcapReaderError::Pcap(e)),
-            None => unimplemented!(),
+            None => Ok(None),
         }
     }
 
@@ -94,12 +89,12 @@ mod test {
     #[test]
     fn can_reject_utf8() {
         let err = PcapReader::is_pcap(Bytes::from_static(b"abcdefg")).unwrap_err();
-        match err { Reason::UnrecognizedHeader(_) => {}, _ => panic!("Unexpected error reason")}
+        match err { PcapReaderError::BadHeader(_) => {}, _ => panic!("Unexpected error reason")}
     }
 
     #[test]
     fn can_reject_dsdreplay() {
         let err = PcapReader::is_pcap(Bytes::from_static(DSD_RECAP_PARTIAL)).unwrap_err();
-        match err { Reason::UnrecognizedHeader(_) => {}, _ => panic!("Unexpected error reason")}
+        match err { PcapReaderError::BadHeader(_) => {}, _ => panic!("Unexpected error reason")}
     }
 }
