@@ -158,8 +158,6 @@ impl PcapReader {
 
 #[cfg(test)]
 mod test {
-    use crate::init_logging;
-
     use super::*;
 
     // all of my current pcap files were created using this tcpdump invocation
@@ -212,8 +210,6 @@ mod test {
 
     #[test]
     fn can_read_udp_from_sll2_packet() {
-        init_logging();
-
         let mut reader = PcapReader::new(Bytes::from_static(PCAP_SLLV2_SINGLE_UDP_PACKET)).unwrap();
         let header = reader.header;
         let packet = reader.read_packet().unwrap().unwrap();
@@ -231,8 +227,6 @@ mod test {
 
     #[test]
     fn can_read_udp_from_eth1_packet() {
-        init_logging();
-
         let mut reader = PcapReader::new(Bytes::from_static(PCAP_ETH1_SINGLE_UDP_PACKET)).unwrap();
         let header = reader.header;
         let packet = reader.read_packet().unwrap().unwrap();

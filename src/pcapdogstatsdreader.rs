@@ -80,8 +80,6 @@ impl PcapDogStatsDReader {
 
 #[cfg(test)]
 mod test {
-    use crate::init_logging;
-
     use super::*;
 
     const PCAP_SINGLE_MESSAGE: &[u8] = &[
@@ -99,8 +97,6 @@ mod test {
 
     #[test]
     fn can_read_single_message_packet() {
-        init_logging();
-
         let mut reader = PcapDogStatsDReader::new(Bytes::from_static(PCAP_SINGLE_MESSAGE)).unwrap();
 
         let mut s = String::new();
