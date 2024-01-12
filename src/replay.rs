@@ -77,6 +77,8 @@ impl ReplayReader {
     ///
     /// 8 bytes are always consumed.
     pub fn is_replay(mut header: Bytes) -> Result<(), ReplayReaderError> {
+        assert!(header.len() >= 8);
+
         // todo is there a better way to grab first 4 into slice?
         // - slice + advance
         // - clone + take(4) + into_inner

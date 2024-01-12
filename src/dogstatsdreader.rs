@@ -33,6 +33,10 @@ enum InputType {
 
 /// Does not consume from header
 fn input_type_of(header: Bytes) -> InputType {
+    // I need to decide and unify if file type detection
+    // should be done by
+    // - looking at a fixed-length byte slice from beginning of stream (current approach)
+    // - offering the entire (tbd, what does entire even mean) byte slice to the deciding functions
     assert!(header.len() >= 8);
 
     debug!("8 byte header: {:02x?}", &header.slice(0..8));

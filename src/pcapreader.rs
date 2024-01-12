@@ -38,9 +38,11 @@ impl PcapReader {
 
     // Advances header 4 bytes
     pub fn is_pcap(mut header: Bytes) -> Result<(), PcapReaderError> {
+        assert!(header.len() >= 4);
+
         let first_four = header.slice(0..4);
         header.advance(4);
-        // todo pcap_file has a more comprehensive check
+        // pcap_file has a more comprehensive check, but requires at least 24 bytes
         if first_four != PCAP_HEADER && first_four != PCAP_HEADER_SWAPPED {
             return Err(PcapReaderError::BadHeader(format!("first four: {first_four:#?}")));
         }
