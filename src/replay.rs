@@ -31,7 +31,7 @@ pub enum ReplayReaderError {
 
 impl ReplayReader {
     pub fn supported_versions() -> &'static [u8] {
-        &[4]
+        &[3]
     }
     /// read_msg will return the next UnixDogstatsdMsg if it exists
     pub fn read_msg(&mut self) -> Option<UnixDogstatsdMsg> {
@@ -70,20 +70,48 @@ impl ReplayReader {
         }
     }
 
-    pub fn new(mut buf: Bytes) -> Result<Self, ReplayReaderError> {
-        let header = buf.copy_to_bytes(4);
-        if header != DATADOG_HEADER {
+    /// header must point to at least 8 bytes
+    /// first four should be the replay header magic bytes
+    /// next u8 should be the dogstatsd version
+    /// next 3 bytes are unused
+    ///
+    /// 8 bytes are always consumed.
+    pub fn is_replay(mut header: Bytes) -> Result<(), ReplayReaderError> {
+        assert!(header.len() >= 8);
+
+        // todo is there a better way to grab first 4 into slice?
+        // - slice + advance
+        // - clone + take(4) + into_inner
+        let first_four = header.slice(0..4);
+        header.advance(4);
+        if first_four != DATADOG_HEADER {
+            header.advance(4); // consume next 4 bytes for a total of 8
             return Err(ReplayReaderError::NotAReplayFile);
         }
         // Next byte describes the replay version
         // f0 is bitwise or'd with the file version, so to get the file version, do a bitwise xor
-        let version = buf.get_u8() ^ 0xF0;
+        let version = header.get_u8() ^ 0xF0;
 
         if version != 3 {
+            header.advance(3); // consume next 3 bytes per contract
             return Err(ReplayReaderError::UnsupportedReplayVersion(version));
         }
-        // Consume the next 3 bytes, the rest of the file header
-        buf.advance(3);
+        header.advance(3); // consume next 3 bytes per contract
+        Ok(())
+    }
+
+    // consumes 8 bytes during construction, even if construction fails
+    pub fn new(mut buf: Bytes) -> Result<Self, ReplayReaderError> {
+        // clone for header check,
+        let header = buf.clone();
+        // is_replay consumes 8 bytes per contract
+        // if this fails, 8 bytes will still be consumed
+        Self::is_replay(header)?;
+
+        // We passed a clone to is_replay, so original buffer still points to
+        // the header.
+        // Advance past header and finish initialization
+        buf.advance(8);
 
         Ok(Self {
             buf,
@@ -145,7 +173,7 @@ mod tests {
 
         for (i, &code) in hex_codes.iter().enumerate() {
             // Check if the code is in printable ASCII range
-            if code >= 0x20 && code <= 0x7E {
+            if (0x20..=0x7E).contains(&code) {
                 result.push_str(&format!("b'{}'", code as char));
             } else {
                 result.push_str(&format!("0x{:02X}", code));

@@ -25,6 +25,7 @@ fn dogstatsdmsg_parsing() {
 #[divan::bench(min_time = Duration::from_secs(10))]
 fn dogstatsdmsg_parsing_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+    let length_prefix_framed = false;
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
         dogstatsd::ConfRange::Inclusive {
@@ -52,6 +53,7 @@ fn dogstatsdmsg_parsing_throughput(bencher: divan::Bencher) {
         KindWeights::default(),
         MetricWeights::default(),
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");
@@ -71,6 +73,7 @@ fn dogstatsdmsg_parsing_throughput(bencher: divan::Bencher) {
 #[divan::bench(min_time = Duration::from_secs(2))]
 fn dogstatsdmsg_parsing_metrics_only_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+    let length_prefix_framed = false;
     let kind_weights = KindWeights::new(1, 0, 0);
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
@@ -99,6 +102,7 @@ fn dogstatsdmsg_parsing_metrics_only_throughput(bencher: divan::Bencher) {
         kind_weights,
         MetricWeights::default(),
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");
@@ -118,6 +122,7 @@ fn dogstatsdmsg_parsing_metrics_only_throughput(bencher: divan::Bencher) {
 #[divan::bench(min_time = Duration::from_secs(2))]
 fn dogstatsdmsg_parsing_events_only_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+    let length_prefix_framed = false;
     let kind_weights = KindWeights::new(0, 1, 0);
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
@@ -146,6 +151,7 @@ fn dogstatsdmsg_parsing_events_only_throughput(bencher: divan::Bencher) {
         kind_weights,
         MetricWeights::default(),
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");
@@ -165,6 +171,7 @@ fn dogstatsdmsg_parsing_events_only_throughput(bencher: divan::Bencher) {
 #[divan::bench(min_time = Duration::from_secs(2))]
 fn dogstatsdmsg_parsing_servicechecks_only_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
+    let length_prefix_framed = false;
     let kind_weights = KindWeights::new(0, 0, 1);
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
@@ -193,6 +200,7 @@ fn dogstatsdmsg_parsing_servicechecks_only_throughput(bencher: divan::Bencher) {
         kind_weights,
         MetricWeights::default(),
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");

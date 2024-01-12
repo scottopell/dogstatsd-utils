@@ -1,6 +1,6 @@
 use std::{num::NonZeroU32, time::Duration};
 
-use dogstatsd_utils::rate::{parse_rate, RateSpecification};
+use dogstatsd_utils::{rate::{parse_rate, RateSpecification}, init_logging};
 use lading_throttle::Throttle;
 use rand::{rngs::SmallRng, SeedableRng};
 use thiserror::Error;
@@ -45,13 +45,7 @@ pub enum DSDGenerateError {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), DSDGenerateError> {
-    let info_or_env = tracing_subscriber::filter::EnvFilter::builder()
-        .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
-        .from_env_lossy();
-
-    tracing_subscriber::fmt()
-        .with_env_filter(info_or_env)
-        .init();
+    init_logging();
     let args = Args::parse();
 
     if args.num_msgs.is_some() && args.rate.is_some() {
@@ -118,6 +112,7 @@ async fn main() -> Result<(), DSDGenerateError> {
         Some(num_contexts) => dogstatsd::ConfRange::Constant(num_contexts),
         None => dogstatsd::ConfRange::Inclusive { min: 100, max: 500 },
     };
+    let length_prefix_framed = false;
     let dd = dogstatsd::DogStatsD::new(
         // Contexts
         context_range,
@@ -142,6 +137,7 @@ async fn main() -> Result<(), DSDGenerateError> {
         KindWeights::default(),
         metric_weights,
         ValueConf::default(),
+        length_prefix_framed,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");
