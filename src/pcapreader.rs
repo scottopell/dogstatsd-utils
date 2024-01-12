@@ -49,6 +49,27 @@ impl PcapReader {
         Ok(())
     }
 
+    fn get_udp_payload_from_ipv4(ipv4: pnet::packet::ipv4::Ipv4Packet) -> Result<Option<Bytes>, PcapReaderError> {
+        match ipv4.get_next_level_protocol() {
+            pnet::packet::ip::IpNextHeaderProtocols::Udp => {
+                let udp_packet = pnet::packet::udp::UdpPacket::new(ipv4.payload());
+                debug!("UDP packet: {:?}", udp_packet);
+                match udp_packet {
+                    Some(udp_packet) => {
+                        return Ok(Some(Bytes::copy_from_slice(udp_packet.payload())));
+                    }
+                    None => {
+                        error!("Failed to parse UDP packet from IPv4 packet");
+                    }
+                }
+            }
+            _ => {
+                error!("Unsupported protocol found in IPv4 packet: {:?}", ipv4.get_next_level_protocol());
+            }
+        }
+        Ok(None)
+    }
+
     /// This function takes a pcap packet and attempts to unwrap it into a UDP packet
     /// If this is possible, it will return the byte payload of the udp packet.
     /// otherwise this will return None.
@@ -61,9 +82,19 @@ impl PcapReader {
 
         match header.datalink {
             pcap_file::DataLink::ETHERNET => {
-                let ethernet_packet = pnet::packet::ethernet::EthernetPacket::new(&data);
+                let ethernet_packet = pnet::packet::ethernet::EthernetPacket::new(&data).expect("pcap header claimed ethernet packet, but parsing failed");
                 debug!("Ethernet packet: {:?}", ethernet_packet);
-                // handle this case, likely refactor using below logic
+                match ethernet_packet.get_ethertype() {
+                    pnet::packet::ethernet::EtherTypes::Ipv4 => {
+                        let ipv4_packet = pnet::packet::ipv4::Ipv4Packet::new(ethernet_packet.payload()).expect("Header said ipv4, but parsing failed");
+                        debug!("IPv4 packet: {:?}", ipv4_packet);
+                        return Self::get_udp_payload_from_ipv4(ipv4_packet);
+                    }
+                    _ => {
+                        // todo - ipv6
+                        error!("Unsupported protocol found in ethernet packet: {}", ethernet_packet.get_ethertype());
+                    }
+                }
                 todo!()
             }
             pcap_file::DataLink::LINUX_SLL2 => {
@@ -71,32 +102,9 @@ impl PcapReader {
                 debug!("SLLv2 packet: {:?} with protocol type: {}", sllv2_packet, sllv2_packet.get_protocol_type());
                 match sllv2_packet.get_protocol_type() {
                     pnet::packet::ethernet::EtherTypes::Ipv4 => {
-                        let ipv4_packet = pnet::packet::ipv4::Ipv4Packet::new(sllv2_packet.payload());
+                        let ipv4_packet = pnet::packet::ipv4::Ipv4Packet::new(sllv2_packet.payload()).expect("Header said ipv4, but parsing failed");
                         debug!("IPv4 packet: {:?}", ipv4_packet);
-                        match ipv4_packet {
-                            Some(ipv4_packet) => {
-                                match ipv4_packet.get_next_level_protocol() {
-                                    pnet::packet::ip::IpNextHeaderProtocols::Udp => {
-                                        let udp_packet = pnet::packet::udp::UdpPacket::new(ipv4_packet.payload());
-                                        debug!("UDP packet: {:?}", udp_packet);
-                                        match udp_packet {
-                                            Some(udp_packet) => {
-                                                return Ok(Some(Bytes::copy_from_slice(udp_packet.payload())));
-                                            }
-                                            None => {
-                                                error!("Failed to parse UDP packet from IPv4 packet");
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        error!("Unsupported protocol found in IPv4 packet: {:?}", ipv4_packet.get_next_level_protocol());
-                                    }
-                                }
-                            }
-                            None => {
-                                error!("Failed to parse IPv4 packet from SLLv2 packet");
-                            }
-                        }
+                        return Self::get_udp_payload_from_ipv4(ipv4_packet);
                     },
                     _ => {
                         // todo - ipv6
@@ -173,6 +181,19 @@ mod test {
         0x63, 0x7c, 0x23, 0x68, 0x6f, 0x73, 0x74, 0x3a, 0x66, 0x6f, 0x6f
     ];
 
+    const PCAP_ETH1_SINGLE_UDP_PACKET: &[u8] = &[
+        0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x11, 0xbe, 0xa1, 0x65, 0x07, 0x14, 0x0c, 0x00, 0x49, 0x00, 0x00, 0x00,
+        0x49, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x45, 0x00, 0x00, 0x3b, 0xf7, 0x5a,
+        0x40, 0x00, 0x40, 0x11, 0x45, 0x55, 0x7f, 0x00, 0x00, 0x01, 0x7f, 0x00,
+        0x00, 0x01, 0x9c, 0x60, 0x1f, 0xbd, 0x00, 0x27, 0xfe, 0x3a, 0x61, 0x62,
+        0x63, 0x2e, 0x6d, 0x79, 0x2e, 0x66, 0x61, 0x76, 0x2e, 0x6d, 0x65, 0x74,
+        0x72, 0x69, 0x63, 0x3a, 0x31, 0x7c, 0x63, 0x7c, 0x23, 0x68, 0x6f, 0x73,
+        0x74, 0x3a, 0x66, 0x6f, 0x6f
+    ];
+
     const DSD_RECAP_PARTIAL: &[u8] = & [
         0xd4, 0x74, 0xd0, 0x60, 0xf3, 0xff, 0x00, 0x00, 0x93, 0x00, 0x00, 0x00, 0x08,
     ];
@@ -207,6 +228,26 @@ mod test {
 
         assert_eq!(udp_payload, expected_udp_payload);
     }
+
+    #[test]
+    fn can_read_udp_from_eth1_packet() {
+        init_logging();
+
+        let mut reader = PcapReader::new(Bytes::from_static(PCAP_ETH1_SINGLE_UDP_PACKET)).unwrap();
+        let header = reader.header;
+        let packet = reader.read_packet().unwrap().unwrap();
+        let udp_payload = PcapReader::get_udp_payload_from_packet(packet, header).unwrap().unwrap();
+
+        let expected_udp_payload: &[u8] = &[
+            0x61, 0x62, 0x63, 0x2e, 0x6d, 0x79, 0x2e, 0x66,
+            0x61, 0x76, 0x2e, 0x6d, 0x65, 0x74, 0x72, 0x69,
+            0x63, 0x3a, 0x31, 0x7c, 0x63, 0x7c, 0x23, 0x68,
+            0x6f, 0x73, 0x74, 0x3a, 0x66, 0x6f, 0x6f
+        ];
+
+        assert_eq!(udp_payload, expected_udp_payload);
+    }
+
 
     #[test]
     fn can_reject_utf8() {
