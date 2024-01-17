@@ -28,7 +28,7 @@ impl DogStatsDMsgError {
 }
 
 #[derive(Debug)]
-pub enum DogStatsDStr<'a> {
+pub enum DogStatsDMsg<'a> {
     Metric(DogStatsDMetricStr<'a>),
     Event(DogStatsDEventStr<'a>),
     ServiceCheck(DogStatsDServiceCheckStr<'a>),
@@ -184,12 +184,12 @@ impl Display for DogStatsDMetricType {
     }
 }
 
-impl<'a> DogStatsDStr<'a> {
+impl<'a> DogStatsDMsg<'a> {
     pub fn kind(self) -> DogStatsDMsgKind {
         match self {
-            DogStatsDStr::Event(_) => DogStatsDMsgKind::Event,
-            DogStatsDStr::ServiceCheck(_) => DogStatsDMsgKind::ServiceCheck,
-            DogStatsDStr::Metric(_) => DogStatsDMsgKind::Metric,
+            DogStatsDMsg::Event(_) => DogStatsDMsgKind::Event,
+            DogStatsDMsg::ServiceCheck(_) => DogStatsDMsgKind::ServiceCheck,
+            DogStatsDMsg::Metric(_) => DogStatsDMsgKind::Metric,
         }
     }
     // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|k:<AGGREGATION_KEY>|s:<SOURCE_TYPE_NAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
@@ -293,7 +293,7 @@ impl<'a> DogStatsDStr<'a> {
             }
         }
 
-        Ok(DogStatsDStr::Event(DogStatsDEventStr {
+        Ok(DogStatsDMsg::Event(DogStatsDEventStr {
             title,
             text,
             timestamp,
@@ -374,7 +374,7 @@ impl<'a> DogStatsDStr<'a> {
                     .find(|part| part.starts_with("c:"))
                     .map(|p| p.get(2..).unwrap());
 
-                Ok(DogStatsDStr::Metric(DogStatsDMetricStr {
+                Ok(DogStatsDMsg::Metric(DogStatsDMetricStr {
                     raw_msg: str_msg,
                     name,
                     values,
@@ -469,7 +469,7 @@ impl<'a> DogStatsDStr<'a> {
             }
         }
 
-        Ok(DogStatsDStr::ServiceCheck(DogStatsDServiceCheckStr {
+        Ok(DogStatsDMsg::ServiceCheck(DogStatsDServiceCheckStr {
             raw_msg,
             name,
             tags,
@@ -510,12 +510,12 @@ mod tests {
         ($name:ident, $input:expr, $expected_name:expr, $expected_values:expr, $expected_type:expr, $expected_tags:expr, $expected_sample_rate:expr, $expected_timestamp:expr, $expected_container_id:expr, $expected_error:expr) => {
             #[test]
             fn $name() {
-                let msg = match DogStatsDStr::new($input) {
-                    Ok(DogStatsDStr::Metric(m)) => m,
-                    Ok(DogStatsDStr::ServiceCheck(_)) => {
+                let msg = match DogStatsDMsg::new($input) {
+                    Ok(DogStatsDMsg::Metric(m)) => m,
+                    Ok(DogStatsDMsg::ServiceCheck(_)) => {
                         panic!("Got service check, expected metric")
                     }
-                    Ok(DogStatsDStr::Event(_)) => panic!("Got event, expected metric"),
+                    Ok(DogStatsDMsg::Event(_)) => panic!("Got event, expected metric"),
                     Err(e) => {
                         let Some((expected_error_kind, expected_error_message)) = $expected_error else {
                             panic!("Got an error but did not expect one {}", e);
@@ -545,12 +545,12 @@ mod tests {
         ($name:ident, $input:expr, $expected_title:expr, $expected_text:expr, $expected_timestamp:expr, $expected_hostname:expr, $expected_priority:expr, $expected_alert_type:expr, $expected_tags:expr, $expected_error:expr) => {
             #[test]
             fn $name() {
-                let msg = match DogStatsDStr::new($input) {
-                    Ok(DogStatsDStr::Event(e)) => e,
-                    Ok(DogStatsDStr::ServiceCheck(_)) => {
+                let msg = match DogStatsDMsg::new($input) {
+                    Ok(DogStatsDMsg::Event(e)) => e,
+                    Ok(DogStatsDMsg::ServiceCheck(_)) => {
                         panic!("Got service check, expected metric")
                     }
-                    Ok(DogStatsDStr::Metric(_)) => panic!("Got metric, expected event"),
+                    Ok(DogStatsDMsg::Metric(_)) => panic!("Got metric, expected event"),
                     Err(e) => match $expected_error {
                         Some(_expected_error) => {
                             let Some((expected_error_kind, expected_error_message)) = $expected_error else {
@@ -872,8 +872,8 @@ mod tests {
     fn basic_events() {
         // _e{<TITLE_UTF8_LENGTH>,<TEXT_UTF8_LENGTH>}:<TITLE>|<TEXT>|d:<TIMESTAMP>|h:<HOSTNAME>|p:<PRIORITY>|t:<ALERT_TYPE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>
         let raw_msg = "_e{2,4}:ab|cdef|d:160|h:myhost|p:high|t:severe|#env:prod,onfire:true\n";
-        let msg = match DogStatsDStr::new(raw_msg) {
-            Ok(DogStatsDStr::Event(m)) => m,
+        let msg = match DogStatsDMsg::new(raw_msg) {
+            Ok(DogStatsDMsg::Event(m)) => m,
             Err(e) => panic!("Unexpected error: {}", e),
             Ok(_) => panic!("Wrong type"),
         };
@@ -919,11 +919,11 @@ mod tests {
         for _ in 0..500_000 {
             let lading_msg = dd.generate(&mut rng);
             let str_lading_msg = format!("{}", lading_msg);
-            let msg = DogStatsDStr::new(str_lading_msg.as_str()).unwrap();
+            let msg = DogStatsDMsg::new(str_lading_msg.as_str()).unwrap();
             match lading_msg {
                 dogstatsd::Member::Event(ld_event) => match msg {
-                    DogStatsDStr::Metric(_) => panic!("Wrong type"),
-                    DogStatsDStr::Event(e_parsed) => {
+                    DogStatsDMsg::Metric(_) => panic!("Wrong type"),
+                    DogStatsDMsg::Event(e_parsed) => {
                         assert_eq!(e_parsed.title, ld_event.title);
                         assert_eq!(e_parsed.aggregation_key, ld_event.aggregation_key);
                         assert_eq!(e_parsed.hostname, ld_event.hostname);
@@ -942,12 +942,12 @@ mod tests {
                             assert_eq!(EventAlert::Info, e_parsed.alert_type);
                         }
                     }
-                    DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
+                    DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
                 },
                 dogstatsd::Member::ServiceCheck(ld_sc) => {
                     match msg {
-                        DogStatsDStr::Metric(_) => panic!("Wrong type"),
-                        DogStatsDStr::ServiceCheck(sc_parsed) => {
+                        DogStatsDMsg::Metric(_) => panic!("Wrong type"),
+                        DogStatsDMsg::ServiceCheck(sc_parsed) => {
                             assert_eq!(sc_parsed.name, ld_sc.name);
                             assert_eq!(sc_parsed.hostname, ld_sc.hostname);
                             assert_eq!(sc_parsed.message, ld_sc.message);
@@ -963,13 +963,13 @@ mod tests {
                                 assert_eq!(sc_parsed.tags.len(), 0);
                             }
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     }
                 }
                 dogstatsd::Member::Metric(m) => match m {
                     lading_payload::dogstatsd::metric::Metric::Count(c) => match msg {
-                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
-                        DogStatsDStr::Metric(m_parsed) => {
+                        DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Metric(m_parsed) => {
                             assert_eq!(m_parsed.name, c.name);
                             assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Count);
                             assert_eq!(m_parsed.container_id, c.container_id);
@@ -977,47 +977,47 @@ mod tests {
                                 assert!(c.tags.contains(&t.to_owned()));
                             }
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     },
                     lading_payload::dogstatsd::metric::Metric::Gauge(g) => match msg {
-                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
-                        DogStatsDStr::Metric(m_parsed) => {
+                        DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Metric(m_parsed) => {
                             assert_eq!(m_parsed.name, g.name);
                             assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Gauge);
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     },
                     lading_payload::dogstatsd::metric::Metric::Histogram(h) => match msg {
-                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
-                        DogStatsDStr::Metric(m_parsed) => {
+                        DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Metric(m_parsed) => {
                             assert_eq!(m_parsed.name, h.name);
                             assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Histogram);
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     },
                     lading_payload::dogstatsd::metric::Metric::Timer(t) => match msg {
-                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
-                        DogStatsDStr::Metric(m_parsed) => {
+                        DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Metric(m_parsed) => {
                             assert_eq!(m_parsed.name, t.name);
                             assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Timer);
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     },
                     lading_payload::dogstatsd::metric::Metric::Distribution(d) => match msg {
-                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
-                        DogStatsDStr::Metric(m_parsed) => {
+                        DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Metric(m_parsed) => {
                             assert_eq!(m_parsed.name, d.name);
                             assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Distribution);
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     },
                     lading_payload::dogstatsd::metric::Metric::Set(s) => match msg {
-                        DogStatsDStr::ServiceCheck(_) => panic!("Wrong type"),
-                        DogStatsDStr::Metric(m_parsed) => {
+                        DogStatsDMsg::ServiceCheck(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Metric(m_parsed) => {
                             assert_eq!(m_parsed.name, s.name);
                             assert_eq!(m_parsed.metric_type, DogStatsDMetricType::Set);
                         }
-                        DogStatsDStr::Event(_) => panic!("Wrong type"),
+                        DogStatsDMsg::Event(_) => panic!("Wrong type"),
                     },
                 },
             }
@@ -1028,8 +1028,8 @@ mod tests {
     fn basic_service_checks() {
         // _sc|<NAME>|<STATUS>|d:<TIMESTAMP>|h:<HOSTNAME>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_2>|m:<SERVICE_CHECK_MESSAGE>
         let raw_msg = "_sc|ab|2|d:160|h:myhost|#env:prod,onfire:true|m:mymessage\n";
-        let msg = match DogStatsDStr::new(raw_msg) {
-            Ok(DogStatsDStr::ServiceCheck(m)) => m,
+        let msg = match DogStatsDMsg::new(raw_msg) {
+            Ok(DogStatsDMsg::ServiceCheck(m)) => m,
             Ok(_) => panic!("Wrong type"),
             Err(e) => panic!("Unexpected error {}", e),
         };
@@ -1043,7 +1043,7 @@ mod tests {
     #[test]
     fn invalid_statsd_msg() {
         let mut found_expected_error = false;
-        if let Err(DogStatsDMsgError::ParseError { kind, .. } ) = DogStatsDStr::new("abcdefghiq") {
+        if let Err(DogStatsDMsgError::ParseError { kind, .. } ) = DogStatsDMsg::new("abcdefghiq") {
             found_expected_error = kind == DogStatsDMsgKind::Metric
         }
         assert!(found_expected_error);

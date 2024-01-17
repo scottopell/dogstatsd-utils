@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use divan::counter::BytesCount;
-use dogstatsd_utils::dogstatsdmsg::DogStatsDStr;
+use dogstatsd_utils::dogstatsdmsg::DogStatsDMsg;
 use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
 use rand::{rngs::SmallRng, SeedableRng};
 
@@ -14,7 +14,7 @@ fn main() {
 fn dogstatsdmsg_parsing() {
     fn compute(n: u64) {
         for msg in vec!["my.metric:1|g#some:tag"].repeat(n as usize) {
-            let msg = DogStatsDStr::new(msg);
+            let msg = DogStatsDMsg::new(msg);
             let _ = msg;
         }
     }
@@ -65,7 +65,7 @@ fn dogstatsdmsg_parsing_throughput(bencher: divan::Bencher) {
             BytesCount::of_str(s)
         })
         .bench_local_values(|s: String| {
-            let msg = DogStatsDStr::new(s.as_str());
+            let msg = DogStatsDMsg::new(s.as_str());
             let _ = msg;
         })
 }
@@ -114,7 +114,7 @@ fn dogstatsdmsg_parsing_metrics_only_throughput(bencher: divan::Bencher) {
             BytesCount::of_str(s)
         })
         .bench_local_values(|s: String| {
-            let msg = DogStatsDStr::new(s.as_str());
+            let msg = DogStatsDMsg::new(s.as_str());
             let _ = msg;
         })
 }
@@ -163,7 +163,7 @@ fn dogstatsdmsg_parsing_events_only_throughput(bencher: divan::Bencher) {
             BytesCount::of_str(s)
         })
         .bench_local_values(|s: String| {
-            let msg = DogStatsDStr::new(s.as_str());
+            let msg = DogStatsDMsg::new(s.as_str());
             let _ = msg;
         })
 }
@@ -212,7 +212,7 @@ fn dogstatsdmsg_parsing_servicechecks_only_throughput(bencher: divan::Bencher) {
             BytesCount::of_str(s)
         })
         .bench_local_values(|s: String| {
-            let msg = DogStatsDStr::new(s.as_str());
+            let msg = DogStatsDMsg::new(s.as_str());
             let _ = msg;
         })
 }

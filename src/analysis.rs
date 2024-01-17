@@ -7,7 +7,7 @@ use std::{
 use histo::Histogram;
 
 use crate::{
-    dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsgKind, DogStatsDStr},
+    dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsgKind, DogStatsDMsg},
     dogstatsdreader::DogStatsDReader,
 };
 
@@ -80,16 +80,16 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
             // EOF
             break;
         }
-        let metric_msg = match DogStatsDStr::new(&line) {
-            Ok(DogStatsDStr::Metric(m)) => m,
-            Ok(DogStatsDStr::Event(_)) => {
+        let metric_msg = match DogStatsDMsg::new(&line) {
+            Ok(DogStatsDMsg::Metric(m)) => m,
+            Ok(DogStatsDMsg::Event(_)) => {
                 msg_stats
                     .kind
                     .entry(DogStatsDMsgKind::Event)
                     .and_modify(|(v, _)| *v += 1);
                 continue;
             }
-            Ok(DogStatsDStr::ServiceCheck(_)) => {
+            Ok(DogStatsDMsg::ServiceCheck(_)) => {
                 msg_stats
                     .kind
                     .entry(DogStatsDMsgKind::ServiceCheck)
