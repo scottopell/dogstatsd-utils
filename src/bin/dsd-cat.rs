@@ -30,19 +30,13 @@ fn main() -> Result<(), Error> {
     init_logging();
     let args = Args::parse();
 
-    let bytes: Bytes = if let Some(input_file) = args.input {
+    let mut reader = if let Some(input_file) = args.input {
         let file_path = Path::new(&input_file);
 
-        Bytes::from(fs::read(file_path).unwrap())
+        DogStatsDReader::new(fs::File::open(file_path).unwrap()).unwrap()
     } else {
-        let mut contents = Vec::new();
-        // TODO handle empty stream better probably
-        // and consolidate this amongst dsd-cat and dsd-analyze
-        io::stdin().read_to_end(&mut contents).unwrap();
-        Bytes::from(contents)
+        DogStatsDReader::new(io::stdin().lock()).unwrap()
     };
-
-    let mut reader = DogStatsDReader::new(bytes);
 
     if let Some(outpath) = args.output {
         if outpath == "-" {

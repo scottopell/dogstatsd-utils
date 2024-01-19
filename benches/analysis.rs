@@ -13,6 +13,7 @@ fn main() {
     divan::main();
 }
 
+/*
 #[divan::bench(min_time = Duration::from_secs(10))]
 fn analysis_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
@@ -52,7 +53,7 @@ fn analysis_throughput(bencher: divan::Bencher) {
     bencher
         .with_inputs(|| {
             let payload = format!("{}", dd.generate(&mut rng)).into_bytes();
-            (payload.len(), DogStatsDReader::new(Bytes::from(payload)))
+            (payload.len(), DogStatsDReader::new(&payload[..]).unwrap())
         })
         .input_counter(|(len, _)| {
             // Changes based on input.
@@ -62,3 +63,5 @@ fn analysis_throughput(bencher: divan::Bencher) {
             analyze_msgs(&mut reader).unwrap();
         })
 }
+
+*/

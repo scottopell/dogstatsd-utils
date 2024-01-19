@@ -1,13 +1,16 @@
 use bytes::{buf::Reader, Buf, Bytes};
-use std::io::BufRead;
-pub struct Utf8DogStatsDReader {
-    reader: Reader<Bytes>,
+use std::io::{BufRead, BufReader, Read};
+pub struct Utf8DogStatsDReader<'a>
+{
+    reader: Box<dyn std::io::BufRead + 'a>,
 }
 
-impl Utf8DogStatsDReader {
-    pub fn new(buf: Bytes) -> Self {
-        let reader = buf.reader();
-        Utf8DogStatsDReader { reader }
+impl<'a> Utf8DogStatsDReader<'a>
+{
+    pub fn new(reader: impl BufRead + 'a) -> Self {
+        Utf8DogStatsDReader {
+            reader: Box::new(reader),
+        }
     }
 
     pub fn read_msg(&mut self, s: &mut String) -> std::io::Result<usize> {
@@ -35,7 +38,7 @@ mod tests {
     fn utf8_reader_single_msg() {
         // Given 1 msg
         let payload = b"my.metric:1|g";
-        let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = Utf8DogStatsDReader::new(&payload[..]);
         let mut s = String::new();
 
         // When reader is read
@@ -53,7 +56,7 @@ mod tests {
     fn utf8_reader_single_msg_multiple_newlines() {
         // Given 1 msg
         let payload = b"my.metric:1|g\n\n";
-        let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = Utf8DogStatsDReader::new(&payload[..]);
         let mut s = String::new();
 
         // When reader is read
@@ -72,7 +75,7 @@ mod tests {
     fn utf8_reader_single_msg_trailing_newline() {
         // Given one msg with newline
         let payload = b"my.metric:1|g\n";
-        let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = Utf8DogStatsDReader::new(&payload[..]);
         let mut s = String::new();
 
         // When read
@@ -90,7 +93,7 @@ mod tests {
     fn utf8_reader_multi_msg_msg() {
         // Given 2 msgs
         let payload = b"my.metric:1|g\nmy.metric:2|g";
-        let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = Utf8DogStatsDReader::new(&payload[..]);
         let mut s = String::new();
 
         // When read, expect msg 1
@@ -113,7 +116,7 @@ mod tests {
     fn utf8_reader_multi_msg_msg_trailing_newline() {
         // Given 2 msgs with a trailing newline
         let payload = b"my.metric:1|g\nmy.metric:2|g\n";
-        let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = Utf8DogStatsDReader::new(&payload[..]);
         let mut s = String::new();
 
         // When read, expect msg 1
@@ -135,7 +138,7 @@ mod tests {
     fn utf8_reader_example() {
         // Given 2 msgs with a trailing newline
         let payload = b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
-        let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = Utf8DogStatsDReader::new(&payload[..]);
         let mut s = String::new();
 
         let mut iters = 0;

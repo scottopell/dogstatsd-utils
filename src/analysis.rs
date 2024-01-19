@@ -1,13 +1,13 @@
 use std::{
     collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet},
     hash::{BuildHasher, Hasher},
-    io::Write,
+    io::{BufRead, Read, Write},
 };
 
 use histo::Histogram;
 
 use crate::{
-    dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsgKind, DogStatsDMsg},
+    dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsg, DogStatsDMsgKind},
     dogstatsdreader::DogStatsDReader,
 };
 
@@ -39,7 +39,10 @@ where
     }
 }
 
-pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats, std::io::Error> {
+pub fn analyze_msgs(
+    reader: &mut DogStatsDReader,
+) -> Result<DogStatsDBatchStats, std::io::Error>
+{
     let default_num_buckets = DEFAULT_NUM_BUCKETS;
     let mut msg_stats = DogStatsDBatchStats {
         name_length: Histogram::with_buckets(default_num_buckets),
@@ -153,14 +156,17 @@ pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats,
 
 #[cfg(test)]
 mod tests {
+    use bytes::Buf;
     use bytes::Bytes;
+
+    use crate::dogstatsdreader;
 
     use super::*;
 
     #[test]
     fn counting_contexts() {
         let payload = b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 3);
@@ -170,14 +176,14 @@ mod tests {
     fn counting_contexts_name_variations() {
         let payload =
             b"my.metrice:1|g\nmy.metricd:1|g\nmy.metricc:1|g\nmy.metricb:1|g\nmy.metrica:1|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 5);
 
         let payload =
             b"my.metric:1|g|#foo:a\nmy.metric:1|g\nmy.metric:1|g\nmy.metric:1|g\nmy.metric:1|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 2);
@@ -187,21 +193,21 @@ mod tests {
     fn counting_contexts_tag_variations() {
         let payload =
             b"my.metric:1|g|#foo:a\nmy.metric:1|g|#foo:b\nmy.metric:1|g|#foo:c\nmy.metric:1|g|#foo:d\nmy.metric:1|g|#foo:e\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 5);
 
         let payload =
             b"my.metric:1|g|#a:foo\nmy.metric:1|g|#b:foo\nmy.metric:1|g|#c:foo\nmy.metric:1|g|#d:foo\nmy.metric:1|g|#e:foo\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 5);
 
         let payload =
             b"my.metric:1|g|#foo\nmy.metric:1|g|#b:foo\nmy.metric:1|g|#b:foo\nmy.metric:1|g|#d:foo\nmy.metric:1|g|#e:foo\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 4);
@@ -211,14 +217,14 @@ mod tests {
     fn counting_contexts_tag_order() {
         let payload =
             b"my.metric:1|g|#foo:a,b,c,d,e\nmy.metric:1|g|#foo:b,a,c,d,e\nmy.metric:1|g|#foo:c,a,b,d,e\nmy.metric:1|g|#foo:d,a,b,c,e\nmy.metric:1|g|#foo:e,a,b,c,d\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 5);
 
         let payload =
             b"my.metric:1|g|#a:foo,b,c,d,e\nmy.metric:1|g|#b:foo,a,c,d,e\nmy.metric:1|g|#c:foo,a,b,d,e\nmy.metric:1|g|#d:foo,a,b,c,e\nmy.metric:1|g|#e:foo,a,b,c,d\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 5);
@@ -229,14 +235,14 @@ mod tests {
     fn counting_contexts_tag_count() {
         let payload =
             b"my.metric:1|g|#foo:a,b,c,d,e\nmy.metric:1|g|#foo:b,a,c,d\nmy.metric:1|g|#foo:c,a,b\nmy.metric:1|g|#foo:d,a\nmy.metric:1|g|#foo:e\nmy.metric:1|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 6);
 
         let payload =
             b"my.metric:1|g|#a:foo,b,c,d,e\nmy.metric:1|g|#b:foo,a,c,d\nmy.metric:1|g|#c:foo,a,b\nmy.metric:1|g|#d:foo,a\nmy.metric:1|g|#e:foo\nmy.metric:1|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         assert_eq!(res.num_contexts, 6);
@@ -246,7 +252,7 @@ mod tests {
     fn counting_contexts_tag_value_length() {
         let payload =
             b"my.metric:1|g|#foo:aaaaaaaaaaaaaa,bbbbbbbbbbbbbb,cccccccccccccc,dddddddddddddd,eeeeeeeeeeeeee\nmy.metric:1|g|#foo:bbbbbbbbbbbbbb,aaaaaaaaaaaaaa,cccccccccccccc,dddddddddddddd\nmy.metric:1|g|#foo:cccccccccccccc,aaaaaaaaaaaaaa,bbbbbbbbbbbbbb\nmy.metric:1|g|#foo:dddddddddddddd,aaaaaaaaaaaaaa\nmy.metric:1|g|#foo:eeeeeeeeeeeeee\nmy.metric:1|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
 
         // 6 because of the empty tags

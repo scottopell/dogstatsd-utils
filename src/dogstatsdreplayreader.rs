@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, str::Utf8Error};
+use std::{collections::VecDeque, str::Utf8Error, io::{BufReader, Read, BufRead}};
 use thiserror::Error;
 
 use bytes::Bytes;
@@ -21,12 +21,14 @@ pub enum DogStatsDReplayReaderError {
     InvalidUtf8Sequence(Utf8Error),
 }
 
-pub struct DogStatsDReplayReader {
-    replay_msg_reader: ReplayReader,
+pub struct DogStatsDReplayReader<'a>
+{
+    replay_msg_reader: ReplayReader<'a>,
     current_messages: VecDeque<String>,
 }
 
-impl DogStatsDReplayReader {
+impl<'a> DogStatsDReplayReader<'a>
+{
     pub fn read_msg(&mut self, s: &mut String) -> Result<usize, DogStatsDReplayReaderError> {
         if let Some(line) = self.current_messages.pop_front() {
             s.insert_str(0, &line);
@@ -34,7 +36,7 @@ impl DogStatsDReplayReader {
         }
 
         match self.replay_msg_reader.read_msg() {
-            Some(msg) => {
+            Ok(Some(msg)) => {
                 match std::str::from_utf8(&msg.payload) {
                     Ok(v) => {
                         if v.is_empty() {
@@ -51,11 +53,14 @@ impl DogStatsDReplayReader {
                     Err(e) => Err(DogStatsDReplayReaderError::InvalidUtf8Sequence(e)),
                 }
             }
-            None => Ok(0), // Read was validly issued, just nothing to be read.
+            Ok(None) => Ok(0), // Read was validly issued, just nothing to be read.
+            Err(e) => {
+                panic!("Unexpected error from ReplayReader::read_msg: {:?}", e);
+            }
         }
     }
 
-    pub fn new(buf: Bytes) -> Result<Self, DogStatsDReplayReaderError> {
+    pub fn new(buf: impl BufRead + 'a) -> Result<Self, DogStatsDReplayReaderError> {
         match ReplayReader::new(buf) {
             Ok(reader) => Ok(DogStatsDReplayReader {
                 replay_msg_reader: reader,
@@ -67,6 +72,9 @@ impl DogStatsDReplayReader {
                 }
                 ReplayReaderError::UnsupportedReplayVersion(e) => {
                     Err(DogStatsDReplayReaderError::UnsupportedReplayVersion(e))
+                }
+                _ => {
+                    panic!("Unexpected error from ReplayReader::new: {:?}", e);
                 }
             },
         }
@@ -139,7 +147,8 @@ mod tests {
 
     #[test]
     fn two_msg_two_lines() {
-        let mut replay = DogStatsDReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH)).unwrap();
+        let buf = BufReader::new(Box::new(TWO_MSGS_ONE_LINE_EACH));
+        let mut replay = DogStatsDReplayReader::new(buf).unwrap();
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -154,7 +163,7 @@ mod tests {
 
     #[test]
     fn one_msg_two_lines() {
-        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_TWO_LINES)).unwrap();
+        let mut replay = DogStatsDReplayReader::new(&ONE_MSG_TWO_LINES[..]).unwrap();
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -169,7 +178,7 @@ mod tests {
 
     #[test]
     fn one_msg_three_lines() {
-        let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_THREE_LINES)).unwrap();
+        let mut replay = DogStatsDReplayReader::new(&ONE_MSG_THREE_LINES[..]).unwrap();
         let mut s = String::new();
 
         let res = replay.read_msg(&mut s).unwrap();

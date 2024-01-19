@@ -1,12 +1,18 @@
+use std::io::BufReader;
+use std::io::BufRead;
+use std::io::Read;
+
 use bytes::{Buf, Bytes};
 use thiserror::Error;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
+    pcapdogstatsdreader::{PcapDogStatsDReader, PcapDogStatsDReaderError},
+    pcapreader::{PcapReader},
     replay::{ReplayReader, ReplayReaderError},
     utf8dogstatsdreader::Utf8DogStatsDReader,
-    zstd::is_zstd, pcapdogstatsdreader::{PcapDogStatsDReader, PcapDogStatsDReaderError}, pcapreader::PcapReader,
+    zstd::is_zstd,
 };
 
 #[derive(Error, Debug)]
@@ -19,10 +25,11 @@ pub enum DogStatsDReaderError {
     Io(#[from] std::io::Error),
 }
 
-pub enum DogStatsDReader {
-    Replay(DogStatsDReplayReader),
-    Utf8(Utf8DogStatsDReader),
-    Pcap(PcapDogStatsDReader),
+pub enum DogStatsDReader<'a>
+{
+    Replay(DogStatsDReplayReader<'a>),
+    Utf8(Utf8DogStatsDReader<'a>),
+    Pcap(PcapDogStatsDReader<'a>),
 }
 
 enum InputType {
@@ -42,17 +49,20 @@ fn input_type_of(header: Bytes) -> InputType {
     debug!("8 byte header: {:02x?}", &header.slice(0..8));
 
     // is_replay will consume the first 8 bytes, so pass a clone
-    match ReplayReader::is_replay(header.clone()) {
+    match crate::replay::is_replay(header.clone()) {
         Ok(()) => return InputType::Replay,
-        Err(e) => {
-            match e {
-                ReplayReaderError::NotAReplayFile => debug!("Not a replay file."),
-                ReplayReaderError::UnsupportedReplayVersion(v) => debug!("Replay header detected, but unsupported version found: {v:x}."),
+        Err(e) => match e {
+            ReplayReaderError::NotAReplayFile => debug!("Not a replay file."),
+            ReplayReaderError::UnsupportedReplayVersion(v) => {
+                debug!("Replay header detected, but unsupported version found: {v:x}.")
             }
-        }
+            _ => {
+                error!("Unexpected error while checking for replay file: {e:?}");
+            }
+        },
     }
 
-    match PcapReader::is_pcap(header.clone()) {
+    match crate::pcapreader::is_pcap(header.clone()) {
         Ok(()) => return InputType::Pcap,
         Err(r) => {
             debug!("Not a pcap file: {r:?}");
@@ -64,27 +74,48 @@ fn input_type_of(header: Bytes) -> InputType {
     InputType::Utf8
 }
 
-impl DogStatsDReader {
+impl<'a> DogStatsDReader<'a>
+{
     /// 'buf' should point either to the beginning of a utf-8 encoded stream of
     /// DogStatsD messages, or to the beginning of a DogStatsD Replay/Capture file
     /// Either sequence can be optionally zstd encoded, it will be automatically
     /// decoded if needed.
-    pub fn new(mut buf: Bytes) -> Self {
-        let mut header_bytes = buf.slice(0..8);
-        // pass a cheap clone to check if zstd
-        if is_zstd(&header_bytes.slice(0..4)) {
+    pub fn new(byte_reader: impl Read + 'a) -> Result<Self, DogStatsDReaderError> {
+        let mut buf_reader: BufReader<Box<dyn Read + 'a>> = BufReader::new(Box::new(byte_reader));
+        // fill_buf allows for a peek-like operation
+        // 'consume' is intentionally never consumed here so that the reader
+        // passed to each reader implementation is always at the beginning of
+        // the stream
+        let mut start_buf = buf_reader.fill_buf()?;
+        if start_buf.len() < 8 {
+            error!("Input stream is too short to be a valid DogStatsD stream");
+            return Err(DogStatsDReaderError::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Input stream is too short to be a valid DogStatsD stream",
+            )));
+        }
+        let mut header_bytes = &start_buf[0..8];
+        if is_zstd(&header_bytes[0..4]) {
             info!("Detected zstd compression.");
             // consume original buffer to completion
-            buf = Bytes::from(zstd::decode_all(buf.reader()).unwrap());
-            // buf now points to a new buffer, so grab a new 8 byte slice of
-            // possibly-header from the new decompressed buffer
-            header_bytes = buf.slice(0..8);
+            let zstd_decoder = zstd::Decoder::new(buf_reader).unwrap();
+            buf_reader = BufReader::new(Box::new(zstd_decoder));
+            start_buf = buf_reader.fill_buf()?;
+            if start_buf.len() < 8 {
+                error!("Decompressed input stream is too short to be a valid DogStatsD stream");
+                return Err(DogStatsDReaderError::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "Decompressed input stream is too short to be a valid DogStatsD stream",
+                )));
+            }
+            header_bytes = &start_buf[0..8];
         }
-        match input_type_of(header_bytes) {
+
+        match input_type_of(Bytes::copy_from_slice(&header_bytes)) {
             InputType::Pcap => {
                 info!("Treating input as pcap");
-                match PcapDogStatsDReader::new(buf) {
-                    Ok(reader) => Self::Pcap(reader),
+                match PcapDogStatsDReader::new(buf_reader) {
+                    Ok(reader) => Ok(Self::Pcap(reader)),
                     Err(e) => {
                         panic!("Pcap Reader couldn't be created: {e:?}");
                     }
@@ -92,16 +123,16 @@ impl DogStatsDReader {
             }
             InputType::Replay => {
                 info!("Treating input as dogstatsd-replay");
-                match DogStatsDReplayReader::new(buf) {
-                    Ok(reader) => Self::Replay(reader),
+                match DogStatsDReplayReader::new(buf_reader) {
+                    Ok(reader) => Ok(Self::Replay(reader)),
                     Err(e) => {
                         panic!("Replay reader couldn't be created: {e:?}");
-                    },
+                    }
                 }
             }
             InputType::Utf8 => {
                 info!("Treating input as utf8");
-                Self::Utf8(Utf8DogStatsDReader::new(buf))
+                Ok(Self::Utf8(Utf8DogStatsDReader::new(buf_reader)))
             }
         }
     }
@@ -147,23 +178,22 @@ mod tests {
     ];
 
     const PCAP_SLL2_SINGLE_UDP_PACKET: &[u8] = &[
-        0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x14, 0x01, 0x00, 0x00,
-        0xef, 0xc0, 0x9d, 0x65, 0xb2, 0xbc, 0x0a, 0x00, 0x4f, 0x00, 0x00, 0x00,
-        0x4f, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-        0x03, 0x04, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x45, 0x00, 0x00, 0x3b, 0x30, 0xf0, 0x40, 0x00, 0x40, 0x11, 0x0b, 0xc0,
-        0x7f, 0x00, 0x00, 0x01, 0x7f, 0x00, 0x00, 0x01, 0x8d, 0x81, 0x1f, 0xbd,
-        0x00, 0x27, 0xfe, 0x3a, 0x61, 0x62, 0x63, 0x2e, 0x6d, 0x79, 0x2e, 0x66,
-        0x61, 0x76, 0x2e, 0x6d, 0x65, 0x74, 0x72, 0x69, 0x63, 0x3a, 0x31, 0x7c,
-        0x63, 0x7c, 0x23, 0x68, 0x6f, 0x73, 0x74, 0x3a, 0x66, 0x6f, 0x6f
+        0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x14, 0x01, 0x00, 0x00, 0xef, 0xc0, 0x9d, 0x65, 0xb2, 0xbc,
+        0x0a, 0x00, 0x4f, 0x00, 0x00, 0x00, 0x4f, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x03, 0x04, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x45, 0x00, 0x00, 0x3b, 0x30, 0xf0, 0x40, 0x00, 0x40, 0x11, 0x0b, 0xc0, 0x7f, 0x00, 0x00,
+        0x01, 0x7f, 0x00, 0x00, 0x01, 0x8d, 0x81, 0x1f, 0xbd, 0x00, 0x27, 0xfe, 0x3a, 0x61, 0x62,
+        0x63, 0x2e, 0x6d, 0x79, 0x2e, 0x66, 0x61, 0x76, 0x2e, 0x6d, 0x65, 0x74, 0x72, 0x69, 0x63,
+        0x3a, 0x31, 0x7c, 0x63, 0x7c, 0x23, 0x68, 0x6f, 0x73, 0x74, 0x3a, 0x66, 0x6f, 0x6f,
     ];
 
     #[test]
     fn utf8_single_msg() {
         // Given 1 msg
         let payload = b"my.metric:1|g";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When reader is read
@@ -181,7 +211,8 @@ mod tests {
     fn utf8_single_msg_trailing_newline() {
         // Given one msg with newline
         let payload = b"my.metric:1|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When read
@@ -199,7 +230,8 @@ mod tests {
     fn utf8_multi_msg() {
         // Given 2 msgs
         let payload = b"my.metric:1|g\nmy.metric:2|g";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When read, expect msg 1
@@ -221,7 +253,8 @@ mod tests {
     fn utf8_multi_msg_msg_trailing_newline() {
         // Given 2 msgs with a trailing newline
         let payload = b"my.metric:1|g\nmy.metric:2|g\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When read, expect msg 1
@@ -243,7 +276,8 @@ mod tests {
     fn utf8_example() {
         // Given 2 msgs with a trailing newline
         let payload = b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         let mut iters = 0;
@@ -273,7 +307,8 @@ mod tests {
             0x28, 0xb5, 0x2f, 0xfd, 0x04, 0x58, 0x69, 0x00, 0x00, 0x6d, 0x79, 0x2e, 0x6d, 0x65,
             0x74, 0x72, 0x69, 0x63, 0x3a, 0x31, 0x7c, 0x67, 0x1e, 0xc8, 0x48, 0xb4,
         ];
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When reader is read
@@ -293,7 +328,8 @@ mod tests {
             0x28, 0xb5, 0x2f, 0xfd, 0x04, 0x58, 0x71, 0x00, 0x00, 0x6d, 0x79, 0x2e, 0x6d, 0x65,
             0x74, 0x72, 0x69, 0x63, 0x3a, 0x31, 0x7c, 0x67, 0x0a, 0x00, 0x72, 0x2c, 0x42,
         ];
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When reader is read
@@ -318,7 +354,8 @@ mod tests {
             0x64, 0x0a, 0x0a, 0x04, 0x00, 0x41, 0x09, 0x43, 0x28, 0x52, 0x69, 0x16, 0x39, 0xb6,
             0xa9, 0x04, 0xb6, 0x9f, 0x86, 0x7f,
         ];
-        let mut reader = DogStatsDReader::new(Bytes::from_static(payload));
+        let mut reader = DogStatsDReader::new(&payload[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
 
         // When reader is read
@@ -350,7 +387,8 @@ mod tests {
 
     #[test]
     fn dsdreplay_two_msg_two_lines() {
-        let mut replay = DogStatsDReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH));
+        let mut replay = DogStatsDReader::new(&TWO_MSGS_ONE_LINE_EACH[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -365,7 +403,8 @@ mod tests {
 
     #[test]
     fn pcap_single_message() {
-        let mut reader = DogStatsDReader::new(Bytes::from(PCAP_SLL2_SINGLE_UDP_PACKET));
+        let mut reader = DogStatsDReader::new(&PCAP_SLL2_SINGLE_UDP_PACKET[..])
+            .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
         let res = reader.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
