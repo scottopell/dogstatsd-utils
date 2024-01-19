@@ -2,11 +2,11 @@ use std::fs;
 use std::fs::File;
 use std::io::stdout;
 use std::io::Error;
-use std::io::Read;
+
 use std::io::{self};
 use std::path::Path;
 
-use bytes::Bytes;
+
 use dogstatsd_utils::analysis::print_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
 

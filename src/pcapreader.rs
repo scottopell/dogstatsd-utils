@@ -231,14 +231,14 @@ mod test {
 
     #[test]
     fn can_read_single_packet() {
-        let mut reader = PcapReader::new(&PCAP_SLLV2_SINGLE_UDP_PACKET[..]).unwrap();
+        let mut reader = PcapReader::new(PCAP_SLLV2_SINGLE_UDP_PACKET).unwrap();
         let packet = reader.read_packet().unwrap().unwrap();
         assert_eq!(packet.data.len(), 79);
     }
 
     #[test]
     fn can_read_udp_from_sll2_packet() {
-        let mut reader = PcapReader::new(&PCAP_SLLV2_SINGLE_UDP_PACKET[..]).unwrap();
+        let mut reader = PcapReader::new(PCAP_SLLV2_SINGLE_UDP_PACKET).unwrap();
         let header = reader.header;
         let packet = reader.read_packet().unwrap().unwrap();
         let udp_payload = get_udp_payload_from_packet(packet, header)
@@ -256,7 +256,7 @@ mod test {
 
     #[test]
     fn can_read_udp_from_eth1_packet() {
-        let mut reader = PcapReader::new(&PCAP_ETH1_SINGLE_UDP_PACKET[..]).unwrap();
+        let mut reader = PcapReader::new(PCAP_ETH1_SINGLE_UDP_PACKET).unwrap();
         let header = reader.header;
         let packet = reader.read_packet().unwrap().unwrap();
         let udp_payload = get_udp_payload_from_packet(packet, header)

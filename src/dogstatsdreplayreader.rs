@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn one_msg_two_lines() {
-        let mut replay = DogStatsDReplayReader::new(&ONE_MSG_TWO_LINES[..]).unwrap();
+        let mut replay = DogStatsDReplayReader::new(ONE_MSG_TWO_LINES).unwrap();
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
         assert_eq!(res, 1);
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn one_msg_three_lines() {
-        let mut replay = DogStatsDReplayReader::new(&ONE_MSG_THREE_LINES[..]).unwrap();
+        let mut replay = DogStatsDReplayReader::new(ONE_MSG_THREE_LINES).unwrap();
         let mut s = String::new();
 
         let res = replay.read_msg(&mut s).unwrap();

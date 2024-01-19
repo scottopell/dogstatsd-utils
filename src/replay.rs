@@ -215,7 +215,7 @@ mod tests {
             "TWO_MSGS_ONE_LINE_EACH follows: {}",
             hex_to_rust_literal(TWO_MSGS_ONE_LINE_EACH)
         );
-        let mut replay = ReplayReader::new(&TWO_MSGS_ONE_LINE_EACH[..]).unwrap();
+        let mut replay = ReplayReader::new(TWO_MSGS_ONE_LINE_EACH).unwrap();
         let msg = replay.read_msg().unwrap().unwrap();
         let mut expected_msg = UnixDogstatsdMsg::default();
         let expected_payload: &[u8] = &[

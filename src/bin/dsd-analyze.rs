@@ -1,11 +1,11 @@
-use bytes::Bytes;
+
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
 use dogstatsd_utils::init_logging;
 
 use std::fs::{self};
-use std::io::Read;
+
 use std::io::{self};
 use std::path::Path;
 

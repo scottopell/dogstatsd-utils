@@ -94,7 +94,7 @@ mod test {
 
     #[test]
     fn can_read_single_message_packet() {
-        let mut reader = PcapDogStatsDReader::new(&PCAP_SINGLE_MESSAGE[..]).unwrap();
+        let mut reader = PcapDogStatsDReader::new(PCAP_SINGLE_MESSAGE).unwrap();
 
         let mut s = String::new();
 

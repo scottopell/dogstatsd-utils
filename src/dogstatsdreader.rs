@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn dsdreplay_two_msg_two_lines() {
-        let mut replay = DogStatsDReader::new(&TWO_MSGS_ONE_LINE_EACH[..])
+        let mut replay = DogStatsDReader::new(TWO_MSGS_ONE_LINE_EACH)
             .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
         let res = replay.read_msg(&mut s).unwrap();
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn pcap_single_message() {
-        let mut reader = DogStatsDReader::new(&PCAP_SLL2_SINGLE_UDP_PACKET[..])
+        let mut reader = DogStatsDReader::new(PCAP_SLL2_SINGLE_UDP_PACKET)
             .expect("could create dogstatsd reader from static bytes");
         let mut s = String::new();
         let res = reader.read_msg(&mut s).unwrap();
