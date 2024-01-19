@@ -1,7 +1,7 @@
-use std::{collections::VecDeque, str::Utf8Error, io::{BufReader, Read, BufRead}};
+use std::{collections::VecDeque, str::Utf8Error, io::{BufRead}};
 use thiserror::Error;
 
-use bytes::Bytes;
+
 
 use crate::replay::{ReplayReader, ReplayReaderError};
 
@@ -83,6 +83,8 @@ impl<'a> DogStatsDReplayReader<'a>
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufReader;
+
     use super::*;
 
     const TWO_MSGS_ONE_LINE_EACH: &[u8] = &[

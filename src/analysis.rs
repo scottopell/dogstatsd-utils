@@ -1,7 +1,7 @@
 use std::{
     collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet},
     hash::{BuildHasher, Hasher},
-    io::{BufRead, Read, Write},
+    io::{BufRead, Write},
 };
 
 use histo::Histogram;

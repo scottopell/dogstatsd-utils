@@ -1,4 +1,4 @@
-use std::{io::{self, Read, BufReader, BufRead}, ops::Deref};
+use std::{io::{self, Read, BufRead}};
 use byteorder::{ByteOrder, LittleEndian};
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -124,7 +124,7 @@ impl<'a> ReplayReader<'a> {
     }
 
     // consumes 8 bytes during construction, even if construction fails
-    pub fn new(mut byte_reader: impl BufRead + 'a) -> Result<Self, ReplayReaderError> {
+    pub fn new(byte_reader: impl BufRead + 'a) -> Result<Self, ReplayReaderError> {
         let mut byte_reader: Box<dyn std::io::BufRead + 'a> = Box::new(byte_reader);
         let mut header_buf = [0; 8];
         byte_reader.read_exact(&mut header_buf)?;
@@ -133,7 +133,7 @@ impl<'a> ReplayReader<'a> {
         Ok(Self {
             reader: byte_reader,
             read_all_unixdogstatsdmsg: false,
-            buf: BytesMut::with_capacity(MAX_MSG_SIZE).into(),
+            buf: BytesMut::with_capacity(MAX_MSG_SIZE),
         })
     }
 }

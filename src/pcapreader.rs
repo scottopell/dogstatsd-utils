@@ -1,6 +1,6 @@
-use std::io::{BufReader, Read};
 
-use bytes::buf::Reader;
+
+
 use bytes::{Buf, Bytes};
 use pcap_file::pcap::PcapPacket;
 use pcap_file::{pcap::PcapHeader, PcapError};
@@ -164,7 +164,7 @@ impl<'a> PcapReader<'a>
     }
 
     pub fn new(byte_reader: impl std::io::BufRead + 'a) -> Result<Self, PcapReaderError> {
-        let mut byte_reader: Box<dyn std::io::BufRead + 'a> = Box::new(byte_reader);
+        let byte_reader: Box<dyn std::io::BufRead + 'a> = Box::new(byte_reader);
         let reader = pcap_file::pcap::PcapReader::new(byte_reader)?;
         let header = reader.header();
         match header.datalink {

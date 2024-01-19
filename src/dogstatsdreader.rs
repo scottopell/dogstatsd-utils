@@ -2,15 +2,14 @@ use std::io::BufReader;
 use std::io::BufRead;
 use std::io::Read;
 
-use bytes::{Buf, Bytes};
+use bytes::{Bytes};
 use thiserror::Error;
 use tracing::{debug, error, info};
 
 use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
     pcapdogstatsdreader::{PcapDogStatsDReader, PcapDogStatsDReaderError},
-    pcapreader::{PcapReader},
-    replay::{ReplayReader, ReplayReaderError},
+    replay::{ReplayReaderError},
     utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
@@ -111,7 +110,7 @@ impl<'a> DogStatsDReader<'a>
             header_bytes = &start_buf[0..8];
         }
 
-        match input_type_of(Bytes::copy_from_slice(&header_bytes)) {
+        match input_type_of(Bytes::copy_from_slice(header_bytes)) {
             InputType::Pcap => {
                 info!("Treating input as pcap");
                 match PcapDogStatsDReader::new(buf_reader) {
