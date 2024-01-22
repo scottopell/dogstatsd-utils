@@ -5,9 +5,17 @@ use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
 use dogstatsd_utils::init_logging;
 
 use std::fs::{self};
-
+use thiserror::Error;
 use std::io::{self};
 use std::path::Path;
+
+#[derive(Error, Debug)]
+pub enum AnalyzeError {
+    #[error("Could not read dogstatsd from provided source")]
+    ReaderFailure(#[from] dogstatsd_utils::dogstatsdreader::DogStatsDReaderError),
+    #[error("IO Error")]
+    Io(#[from] io::Error),
+}
 
 /// Analyze DogStatsD traffic messages
 #[derive(Parser, Debug)]
@@ -17,17 +25,18 @@ struct Args {
     input: Option<String>,
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), AnalyzeError> {
     init_logging();
     let args = Args::parse();
 
     let mut reader = if let Some(input_file) = args.input {
         let file_path = Path::new(&input_file);
 
-        DogStatsDReader::new(fs::File::open(file_path).unwrap()).unwrap()
+        let file = fs::File::open(file_path)?;
+        DogStatsDReader::new(file)
     } else {
-        DogStatsDReader::new(io::stdin().lock()).unwrap()
-    };
+        DogStatsDReader::new(io::stdin().lock())
+    }?;
 
     let msg_stats = analyze_msgs(&mut reader)?;
 
