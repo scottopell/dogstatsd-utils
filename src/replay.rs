@@ -55,9 +55,6 @@ pub enum ReplayReaderError {
 pub fn is_replay(mut header: Bytes) -> Result<(), ReplayReaderError> {
     assert!(header.len() >= 8);
 
-    // todo is there a better way to grab first 4 into slice?
-    // - slice + advance
-    // - clone + take(4) + into_inner
     let first_four = header.slice(0..4);
     header.advance(4);
     if first_four != DATADOG_HEADER {
@@ -82,8 +79,6 @@ impl<'a> ReplayReader<'a> {
         &[3]
     }
     /// read_msg will return the next UnixDogstatsdMsg if it exists
-    /// TODO, may be useful to explicitly return an EOF error
-    /// rather than None
     pub fn read_msg(&mut self) -> Result<Option<UnixDogstatsdMsg>, ReplayReaderError> {
         if self.read_all_unixdogstatsdmsg {
             return Ok(None);
