@@ -1,17 +1,17 @@
+use std::time::Duration;
 
-
-
-
-
-
-
+use divan::counter::BytesCount;
+use dogstatsd_utils::{
+    analysis::analyze_msgs, dogstatsdreader::DogStatsDReader,
+};
+use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
+use rand::{rngs::SmallRng, SeedableRng};
 
 fn main() {
     // Run registered benchmarks.
     divan::main();
 }
 
-/*
 #[divan::bench(min_time = Duration::from_secs(10))]
 fn analysis_throughput(bencher: divan::Bencher) {
     let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
@@ -50,16 +50,15 @@ fn analysis_throughput(bencher: divan::Bencher) {
 
     bencher
         .with_inputs(|| {
-            let payload = format!("{}", dd.generate(&mut rng)).into_bytes();
-            (payload.len(), DogStatsDReader::new(&payload[..]).unwrap())
+            format!("{}", dd.generate(&mut rng)).into_bytes()
         })
-        .input_counter(|(len, _)| {
+        .input_counter(|payload| {
             // Changes based on input.
-            BytesCount::usize(*len)
+            BytesCount::usize(payload.len())
         })
-        .bench_local_values(|(_, mut reader)| {
+        .bench_local_refs(|payload| {
+            let cursor = std::io::Cursor::new(payload);
+            let mut reader = DogStatsDReader::new(cursor).unwrap();
             analyze_msgs(&mut reader).unwrap();
         })
 }
-
-*/
