@@ -5,7 +5,7 @@ use std::io::Error;
 
 use std::io::{self};
 use std::path::Path;
-
+use thiserror::Error;
 
 use dogstatsd_utils::analysis::print_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
@@ -26,17 +26,26 @@ struct Args {
     output: Option<String>,
 }
 
-fn main() -> Result<(), Error> {
+#[derive(Error, Debug)]
+pub enum CatError {
+    #[error("Could not read dogstatsd from provided source")]
+    ReaderFailure(#[from] dogstatsd_utils::dogstatsdreader::DogStatsDReaderError),
+    #[error("IO Error")]
+    Io(#[from] io::Error),
+}
+
+fn main() -> Result<(), CatError> {
     init_logging();
     let args = Args::parse();
 
     let mut reader = if let Some(input_file) = args.input {
         let file_path = Path::new(&input_file);
 
-        DogStatsDReader::new(fs::File::open(file_path).unwrap()).unwrap()
+        let file = fs::File::open(file_path)?;
+        DogStatsDReader::new(file)
     } else {
-        DogStatsDReader::new(io::stdin().lock()).unwrap()
-    };
+        DogStatsDReader::new(io::stdin().lock())
+    }?;
 
     if let Some(outpath) = args.output {
         if outpath == "-" {
