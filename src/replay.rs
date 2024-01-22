@@ -1,9 +1,14 @@
-use bytes::{Buf, Bytes};
-use prost::Message;
+use std::io::{self, Read, BufRead};
+use byteorder::{ByteOrder, LittleEndian};
+
+use bytes::{Buf, Bytes, BytesMut};
+use prost::{Message, DecodeError};
+use tracing::warn;
 
 use crate::dogstatsdreplayreader::dogstatsd::unix::UnixDogstatsdMsg;
 
 const DATADOG_HEADER: &[u8] = &[0xD4, 0x74, 0xD0, 0x60];
+const MAX_MSG_SIZE: usize = 8192; // TODO what is the real max size?
 use thiserror::Error;
 
 pub mod dogstatsd {
@@ -15,107 +20,115 @@ pub mod dogstatsd {
 // TODO currently missing ability to read tagger state from replay file
 // If this is desired, the length can be found as the last 4 bytes of the replay file
 // Only present in version 2 or greater
-#[derive(Debug)]
-pub struct ReplayReader {
-    buf: Bytes,
+pub struct ReplayReader<'a> {
+    reader: Box<dyn std::io::BufRead + 'a>,
     read_all_unixdogstatsdmsg: bool,
+    _buf: BytesMut,
 }
 
-#[derive(Error, Debug, PartialEq)]
+impl<'a> std::fmt::Debug for ReplayReader<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplayReader")
+            .field("read_all_unixdogstatsdmsg", &self.read_all_unixdogstatsdmsg)
+            .finish()
+    }
+}
+
+#[derive(Error, Debug)]
 pub enum ReplayReaderError {
     #[error("No dogstatsd replay marker found")]
     NotAReplayFile,
     #[error("Unsupported replay version")]
     UnsupportedReplayVersion(u8),
+    #[error("IO Error")]
+    Io(#[from] io::Error),
+    #[error("Protobuf Decode error")]
+    ProtoDecode(#[from] DecodeError),
 }
 
-impl ReplayReader {
+/// header must point to at least 8 bytes
+/// first four should be the replay header magic bytes
+/// next u8 should be the dogstatsd version
+/// next 3 bytes are unused
+///
+/// 8 bytes are always consumed.
+pub fn is_replay(mut header: Bytes) -> Result<(), ReplayReaderError> {
+    assert!(header.len() >= 8);
+
+    let first_four = header.slice(0..4);
+    header.advance(4);
+    if first_four != DATADOG_HEADER {
+        header.advance(4); // consume next 4 bytes for a total of 8
+        return Err(ReplayReaderError::NotAReplayFile);
+    }
+    // Next byte describes the replay version
+    // f0 is bitwise or'd with the file version, so to get the file version, do a bitwise xor
+    let version = header.get_u8() ^ 0xF0;
+
+    if version != 3 {
+        header.advance(3); // consume next 3 bytes per contract
+        return Err(ReplayReaderError::UnsupportedReplayVersion(version));
+    }
+    header.advance(3); // consume next 3 bytes per contract
+    Ok(())
+}
+
+
+impl<'a> ReplayReader<'a> {
     pub fn supported_versions() -> &'static [u8] {
         &[3]
     }
     /// read_msg will return the next UnixDogstatsdMsg if it exists
-    pub fn read_msg(&mut self) -> Option<UnixDogstatsdMsg> {
-        if self.buf.remaining() < 4 || self.read_all_unixdogstatsdmsg {
-            return None;
+    pub fn read_msg(&mut self) -> Result<Option<UnixDogstatsdMsg>, ReplayReaderError> {
+        if self.read_all_unixdogstatsdmsg {
+            return Ok(None);
         }
 
         // Read the little endian uint32 that gives the length of the next protobuf message
-        let message_length = self.buf.get_u32_le() as usize;
+
+        let mut msg_length_buf = [0; 4];
+        self.reader.read_exact(&mut msg_length_buf)?;
+
+        let message_length = LittleEndian::read_u32(&msg_length_buf) as usize;
 
         if message_length == 0 {
             // This indicates a record separator between UnixDogStatsdMsg list
             // and the tagger state. Next bytes are all for tagger state.
             self.read_all_unixdogstatsdmsg = true;
-            return None;
-        }
-
-        if self.buf.remaining() < message_length {
-            // end of stream
-            return None;
+            return Ok(None);
         }
 
         // Read the protobuf message
-        let msg_buf = self.buf.copy_to_bytes(message_length);
+        // todo avoid this allocation by using the BytesMut stored in self
+        let mut msg_buf = vec![0; message_length];
+        self.reader.read_exact(&mut msg_buf)?;
+
+        let msg_buf = Bytes::from(msg_buf);
 
         // Decode the protobuf message using the provided .proto file
         match UnixDogstatsdMsg::decode(msg_buf) {
-            Ok(msg) => Some(msg),
+            Ok(msg) => Ok(Some(msg)),
             Err(e) => {
-                println!(
+                warn!(
                     "Unexpected error decoding msg buf: {} do you have a valid dsd capture file?",
                     e
                 );
-                None
+                Err(e.into())
             }
         }
     }
 
-    /// header must point to at least 8 bytes
-    /// first four should be the replay header magic bytes
-    /// next u8 should be the dogstatsd version
-    /// next 3 bytes are unused
-    ///
-    /// 8 bytes are always consumed.
-    pub fn is_replay(mut header: Bytes) -> Result<(), ReplayReaderError> {
-        assert!(header.len() >= 8);
-
-        // todo is there a better way to grab first 4 into slice?
-        // - slice + advance
-        // - clone + take(4) + into_inner
-        let first_four = header.slice(0..4);
-        header.advance(4);
-        if first_four != DATADOG_HEADER {
-            header.advance(4); // consume next 4 bytes for a total of 8
-            return Err(ReplayReaderError::NotAReplayFile);
-        }
-        // Next byte describes the replay version
-        // f0 is bitwise or'd with the file version, so to get the file version, do a bitwise xor
-        let version = header.get_u8() ^ 0xF0;
-
-        if version != 3 {
-            header.advance(3); // consume next 3 bytes per contract
-            return Err(ReplayReaderError::UnsupportedReplayVersion(version));
-        }
-        header.advance(3); // consume next 3 bytes per contract
-        Ok(())
-    }
-
     // consumes 8 bytes during construction, even if construction fails
-    pub fn new(mut buf: Bytes) -> Result<Self, ReplayReaderError> {
-        // clone for header check,
-        let header = buf.clone();
-        // is_replay consumes 8 bytes per contract
-        // if this fails, 8 bytes will still be consumed
-        Self::is_replay(header)?;
-
-        // We passed a clone to is_replay, so original buffer still points to
-        // the header.
-        // Advance past header and finish initialization
-        buf.advance(8);
+    pub fn new(byte_reader: impl BufRead + 'a) -> Result<Self, ReplayReaderError> {
+        let mut byte_reader: Box<dyn std::io::BufRead + 'a> = Box::new(byte_reader);
+        let mut header_buf = [0; 8];
+        byte_reader.read_exact(&mut header_buf)?;
+        is_replay(Bytes::copy_from_slice(&header_buf))?;
 
         Ok(Self {
-            buf,
+            reader: byte_reader,
             read_all_unixdogstatsdmsg: false,
+            _buf: BytesMut::with_capacity(MAX_MSG_SIZE),
         })
     }
 }
@@ -139,6 +152,8 @@ impl ReplayAssembler {
 
 #[cfg(test)]
 mod tests {
+
+    use std::mem::discriminant;
 
     use super::*;
 
@@ -195,8 +210,8 @@ mod tests {
             "TWO_MSGS_ONE_LINE_EACH follows: {}",
             hex_to_rust_literal(TWO_MSGS_ONE_LINE_EACH)
         );
-        let mut replay = ReplayReader::new(Bytes::from(TWO_MSGS_ONE_LINE_EACH)).unwrap();
-        let msg = replay.read_msg().unwrap();
+        let mut replay = ReplayReader::new(TWO_MSGS_ONE_LINE_EACH).unwrap();
+        let msg = replay.read_msg().unwrap().unwrap();
         let mut expected_msg = UnixDogstatsdMsg::default();
         let expected_payload: &[u8] = &[
             b's', b't', b'a', b't', b's', b'd', b'.', b'e', b'x', b'a', b'm', b'p', b'l', b'e',
@@ -222,7 +237,7 @@ mod tests {
         expected_msg.ancillary_size = 0;
         assert_eq!(expected_msg, msg);
 
-        let msg = replay.read_msg().unwrap();
+        let msg = replay.read_msg().unwrap().unwrap();
         let mut expected_msg = UnixDogstatsdMsg::default();
         let expected_payload: &[u8] = &[
             115, 116, 97, 116, 115, 100, 46, 101, 120, 97, 109, 112, 108, 101, 46, 116, 105, 109,
@@ -243,18 +258,18 @@ mod tests {
         expected_msg.ancillary_size = 0;
         assert_eq!(expected_msg, msg);
 
-        assert_eq!(None, replay.read_msg())
+        assert_eq!(None, replay.read_msg().unwrap())
     }
 
     #[test]
     fn invalid_replay_bytes() {
-        let replay = ReplayReader::new(Bytes::from_static(b"my.metric:1|g\n"));
-        assert_eq!(replay.unwrap_err(), ReplayReaderError::NotAReplayFile);
+        let replay = ReplayReader::new(&b"my.metric:1|g\n"[..]);
+        assert_eq!(discriminant(&replay.unwrap_err()), discriminant(&ReplayReaderError::NotAReplayFile));
 
-        let replay = ReplayReader::new(Bytes::from_static(b"abcdefghijklmnopqrstuvwxyz"));
-        assert_eq!(replay.unwrap_err(), ReplayReaderError::NotAReplayFile);
+        let replay = ReplayReader::new(&b"abcdefghijklmnopqrstuvwxyz"[..]);
+        assert_eq!(discriminant(&replay.unwrap_err()), discriminant(&ReplayReaderError::NotAReplayFile));
 
-        let replay = ReplayReader::new(Bytes::from_static(b"\n\n\n\n\n\n\n\n\n\n\n\t\t\t\n\t\n"));
-        assert_eq!(replay.unwrap_err(), ReplayReaderError::NotAReplayFile);
+        let replay = ReplayReader::new(&b"\n\n\n\n\n\n\n\n\n\n\n\t\t\t\n\t\n"[..]);
+        assert_eq!(discriminant(&replay.unwrap_err()), discriminant(&ReplayReaderError::NotAReplayFile));
     }
 }

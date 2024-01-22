@@ -1,13 +1,21 @@
-use bytes::Bytes;
+
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
 use dogstatsd_utils::init_logging;
 
 use std::fs::{self};
-use std::io::Read;
+use thiserror::Error;
 use std::io::{self};
 use std::path::Path;
+
+#[derive(Error, Debug)]
+pub enum AnalyzeError {
+    #[error("Could not read dogstatsd from provided source")]
+    ReaderFailure(#[from] dogstatsd_utils::dogstatsdreader::DogStatsDReaderError),
+    #[error("IO Error")]
+    Io(#[from] io::Error),
+}
 
 /// Analyze DogStatsD traffic messages
 #[derive(Parser, Debug)]
@@ -17,23 +25,18 @@ struct Args {
     input: Option<String>,
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), AnalyzeError> {
     init_logging();
     let args = Args::parse();
 
-    let bytes: Bytes = if let Some(input_file) = args.input {
+    let mut reader = if let Some(input_file) = args.input {
         let file_path = Path::new(&input_file);
 
-        Bytes::from(fs::read(file_path).unwrap())
+        let file = fs::File::open(file_path)?;
+        DogStatsDReader::new(file)
     } else {
-        let mut contents = Vec::new();
-        // TODO handle empty stream better probably
-        // and consolidate this amongst dsd-cat and dsd-analyze
-        io::stdin().read_to_end(&mut contents).unwrap();
-        Bytes::from(contents)
-    };
-
-    let mut reader = DogStatsDReader::new(bytes);
+        DogStatsDReader::new(io::stdin().lock())
+    }?;
 
     let msg_stats = analyze_msgs(&mut reader)?;
 

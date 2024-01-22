@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use bytes::Bytes;
 use divan::counter::BytesCount;
 use dogstatsd_utils::{
     analysis::analyze_msgs, dogstatsdreader::DogStatsDReader,
@@ -51,14 +50,15 @@ fn analysis_throughput(bencher: divan::Bencher) {
 
     bencher
         .with_inputs(|| {
-            let payload = format!("{}", dd.generate(&mut rng)).into_bytes();
-            (payload.len(), DogStatsDReader::new(Bytes::from(payload)))
+            format!("{}", dd.generate(&mut rng)).into_bytes()
         })
-        .input_counter(|(len, _)| {
+        .input_counter(|payload| {
             // Changes based on input.
-            BytesCount::usize(*len)
+            BytesCount::usize(payload.len())
         })
-        .bench_local_values(|(_, mut reader)| {
+        .bench_local_refs(|payload| {
+            let cursor = std::io::Cursor::new(payload);
+            let mut reader = DogStatsDReader::new(cursor).unwrap();
             analyze_msgs(&mut reader).unwrap();
         })
 }

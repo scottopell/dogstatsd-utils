@@ -160,7 +160,7 @@ const TWELVE_MSG_THREE_LINES: &[u8] = &[
 pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("replay parsing -- 3 line single msg", |b| {
         b.iter(|| {
-            let mut replay = DogStatsDReplayReader::new(Bytes::from(ONE_MSG_THREE_LINES)).unwrap();
+            let mut replay = DogStatsDReplayReader::new(ONE_MSG_THREE_LINES).unwrap();
             let mut s = String::new();
 
             for _ in 0..3 {
@@ -172,7 +172,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("replay parsing -- more msgs and more lines", |b| {
         b.iter(|| {
             let mut replay =
-                DogStatsDReplayReader::new(Bytes::from(TWELVE_MSG_THREE_LINES)).unwrap();
+                DogStatsDReplayReader::new(TWELVE_MSG_THREE_LINES).unwrap();
             let mut s = String::new();
 
             for _ in 0..3 {
@@ -183,7 +183,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("utf8 parsing -- four msgs and four lines", |b| {
         b.iter(|| {
-            let mut reader = Utf8DogStatsDReader::new(Bytes::from_static(FOUR_MSG_FOUR_LINES_UTF8));
+            let mut reader = Utf8DogStatsDReader::new(FOUR_MSG_FOUR_LINES_UTF8);
             let mut s = String::new();
 
             for _ in 0..3 {
