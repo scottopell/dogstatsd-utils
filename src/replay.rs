@@ -1,4 +1,4 @@
-use std::{io::{self, Read, BufRead}};
+use std::io::{self, Read, BufRead};
 use byteorder::{ByteOrder, LittleEndian};
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -23,7 +23,7 @@ pub mod dogstatsd {
 pub struct ReplayReader<'a> {
     reader: Box<dyn std::io::BufRead + 'a>,
     read_all_unixdogstatsdmsg: bool,
-    buf: BytesMut,
+    _buf: BytesMut,
 }
 
 impl<'a> std::fmt::Debug for ReplayReader<'a> {
@@ -133,7 +133,7 @@ impl<'a> ReplayReader<'a> {
         Ok(Self {
             reader: byte_reader,
             read_all_unixdogstatsdmsg: false,
-            buf: BytesMut::with_capacity(MAX_MSG_SIZE),
+            _buf: BytesMut::with_capacity(MAX_MSG_SIZE),
         })
     }
 }

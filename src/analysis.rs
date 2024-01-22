@@ -1,7 +1,7 @@
 use std::{
     collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet},
     hash::{BuildHasher, Hasher},
-    io::{BufRead, Write},
+    io::Write,
 };
 
 use histo::Histogram;
@@ -156,10 +156,10 @@ pub fn analyze_msgs(
 
 #[cfg(test)]
 mod tests {
-    
-    
 
-    
+
+
+
 
     use super::*;
 

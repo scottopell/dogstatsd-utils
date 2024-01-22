@@ -1,5 +1,4 @@
-use bytes::{Buf};
-use std::io::{BufRead};
+use std::io::BufRead;
 pub struct Utf8DogStatsDReader<'a>
 {
     reader: Box<dyn std::io::BufRead + 'a>,
