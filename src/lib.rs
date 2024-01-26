@@ -11,6 +11,7 @@ pub mod utf8dogstatsdreader;
 pub mod zstd;
 pub mod pcapreader;
 pub mod pcapdogstatsdreader;
+pub mod udpbytebufreader;
 
 pub fn init_logging() {
     let env_filter = EnvFilter::builder()

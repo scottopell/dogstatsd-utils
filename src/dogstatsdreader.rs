@@ -4,7 +4,10 @@ use std::io::Read;
 
 use bytes::{Bytes};
 use thiserror::Error;
+use tokio_util::codec::Decoder;
 use tracing::{debug, error, info};
+
+use futures_core::stream::Stream;
 
 use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
@@ -75,6 +78,14 @@ fn input_type_of(header: Bytes) -> InputType {
 
 impl<'a> DogStatsDReader<'a>
 {
+
+    /*
+    pub fn new_from_stream(reader: impl Stream<Item = Result<<tokio_util::codec::BytesCodec as tokio_util::codec::Decoder>::Item, <tokio_util::codec::BytesCodec as tokio_util::codec::Decoder>::Error>> + 'a) -> Result<Self, DogStatsDReaderError> {
+        let first_item = reader.poll_next();
+
+    }
+    */
+
     /// 'buf' should point either to the beginning of a utf-8 encoded stream of
     /// DogStatsD messages, or to the beginning of a DogStatsD Replay/Capture file
     /// Either sequence can be optionally zstd encoded, it will be automatically
@@ -85,7 +96,9 @@ impl<'a> DogStatsDReader<'a>
         // 'consume' is intentionally never consumed here so that the reader
         // passed to each reader implementation is always at the beginning of
         // the stream
+        info!("Filling up buffer");
         let mut start_buf = buf_reader.fill_buf()?;
+        info!("Buffer now full, len: {}", start_buf.len());
         if start_buf.len() < 8 {
             error!("Input stream is too short to be a valid DogStatsD stream");
             return Err(DogStatsDReaderError::Io(std::io::Error::new(

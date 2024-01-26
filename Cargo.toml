@@ -28,6 +28,10 @@ pcap-file = "2.0.0-rc1"
 lading-payload = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.5" }
 lading-throttle = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.5" }
 pnet = "0.34.0"
+tokio-util = { version = "0.7.10", features = ["net"] }
+futures-util = "0.3.30"
+futures-core = "0.3.30"
+anyhow = "1.0.79"
 
 
 
