@@ -15,6 +15,8 @@ pub enum AnalyzeError {
     ReaderFailure(#[from] dogstatsd_utils::dogstatsdreader::DogStatsDReaderError),
     #[error("IO Error")]
     Io(#[from] io::Error),
+    #[error("Serde Error")]
+    Serde(#[from] serde_yaml::Error),
 }
 
 /// Analyze DogStatsD traffic messages
@@ -23,6 +25,10 @@ pub enum AnalyzeError {
 struct Args {
     /// File containing dogstatsd data
     input: Option<String>,
+
+    /// Emit lading DSD config
+    #[arg(long, short, default_value_t = false)]
+    lading_config: bool,
 }
 
 fn main() -> Result<(), AnalyzeError> {
@@ -58,6 +64,12 @@ fn main() -> Result<(), AnalyzeError> {
     println!();
     println!("# of Unique Tags: {}", msg_stats.total_unique_tags);
     println!("# of Contexts: {}", msg_stats.num_contexts);
+
+    if args.lading_config {
+        let lading_config = msg_stats.to_lading_config();
+        let str_lading_config = serde_yaml::to_string(&lading_config)?;
+        println!("Lading Config:\n{}", str_lading_config);
+    }
 
     Ok(())
 }
