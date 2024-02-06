@@ -29,6 +29,8 @@ lading-throttle = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.
 pnet = "0.34.0"
 serde_yaml = "0.9.31"
 sketches-ddsketch = "0.2.2"
+chrono = "0.4.33"
+human_bytes = "0.4.3"
 
 
 

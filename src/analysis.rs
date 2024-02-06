@@ -28,6 +28,7 @@ pub struct DogStatsDBatchStats {
     pub total_unique_tags: u32,
     pub num_msgs_with_multivalue: u32,
     pub num_msgs: u32,
+    pub reader_analytics: Option<crate::dogstatsdreader::Analytics>,
 }
 
 #[derive(Error, Debug)]
@@ -192,6 +193,7 @@ pub fn analyze_msgs(
         num_contexts: 0,
         num_msgs: 0,
         num_msgs_with_multivalue: 0,
+        reader_analytics: None,
     };
 
     let mut metric_type_map = HashMap::new();
@@ -295,6 +297,8 @@ pub fn analyze_msgs(
             });
     }
 
+    // Have read through the entire reader, lets try to grab the final "Analytics" if it exists
+    msg_stats.reader_analytics = reader.get_analytics().expect("Error getting analytics from reader");
     msg_stats.total_unique_tags = tags_seen.len() as u32;
     msg_stats.num_contexts = context_map.len() as u32;
     Ok(msg_stats)

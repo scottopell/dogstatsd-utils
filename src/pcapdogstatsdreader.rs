@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use tracing::{debug, error, warn};
 
-use crate::pcapreader::{PcapReader, PcapReaderError};
+use crate::{dogstatsdreader, pcapreader::{PcapReader, PcapReaderError}};
 
 #[derive(Error, Debug)]
 pub enum PcapDogStatsDReaderError {
@@ -17,6 +17,7 @@ pub struct PcapDogStatsDReader<'a>
 {
     pcap_reader: PcapReader<'a>,
     current_messages: VecDeque<String>,
+    analytics: dogstatsdreader::Analytics,
 }
 
 impl<'a> PcapDogStatsDReader<'a>
@@ -26,19 +27,34 @@ impl<'a> PcapDogStatsDReader<'a>
             Ok(reader) => Ok(PcapDogStatsDReader {
                 pcap_reader: reader,
                 current_messages: VecDeque::new(),
+                analytics: dogstatsdreader::Analytics::new(),
             }),
             Err(e) => Err(PcapDogStatsDReaderError::PcapReader(e)),
         }
     }
+
+    pub fn get_analytics(&self) -> Result<dogstatsdreader::Analytics, PcapDogStatsDReaderError> {
+        Ok(self.analytics.clone())
+    }
+
     pub fn read_msg(&mut self, s: &mut String) -> Result<usize, PcapDogStatsDReaderError> {
         if let Some(line) = self.current_messages.pop_front() {
             s.insert_str(0, &line);
+            self.analytics.total_messages += 1;
             return Ok(1);
         }
         let header = self.pcap_reader.header;
 
         match self.pcap_reader.read_packet() {
             Ok(Some(packet)) => {
+                if self.analytics.earliest_timestamp.is_zero() {
+                    self.analytics.earliest_timestamp = packet.timestamp;
+                } else {
+                    self.analytics.latest_timestamp = packet.timestamp;
+                }
+                self.analytics.total_packets += 1;
+
+                self.analytics.total_bytes += packet.data.len() as u64;
                 match crate::pcapreader::get_udp_payload_from_packet(packet, header) {
                     Ok(Some(udp_payload)) => {
                         debug!("Got a UDP Payload of length {}", udp_payload.len());

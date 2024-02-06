@@ -17,12 +17,19 @@ pub mod dogstatsd {
     }
 }
 
+pub enum CaptureFileVersion {
+    V1, // unsupported
+    V2, // unsupported, first version containing tagger state
+    V3, // first version with nanosecond timestamps
+}
+
 // TODO currently missing ability to read tagger state from replay file
 // If this is desired, the length can be found as the last 4 bytes of the replay file
 // Only present in version 2 or greater
 pub struct ReplayReader<'a> {
     reader: Box<dyn std::io::BufRead + 'a>,
     read_all_unixdogstatsdmsg: bool,
+    pub version: CaptureFileVersion,
     _buf: BytesMut,
 }
 
@@ -128,6 +135,7 @@ impl<'a> ReplayReader<'a> {
         Ok(Self {
             reader: byte_reader,
             read_all_unixdogstatsdmsg: false,
+            version: CaptureFileVersion::V3,
             _buf: BytesMut::with_capacity(MAX_MSG_SIZE),
         })
     }

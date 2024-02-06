@@ -1,3 +1,6 @@
+use chrono::{NaiveDateTime, TimeZone, Utc};
+use std::time::Duration;
+use human_bytes::human_bytes;
 
 use sketches_ddsketch::DDSketch;
 use clap::Parser;
@@ -42,6 +45,11 @@ fn sketch_to_string(sketch: &DDSketch) -> String {
     format!("min: {}, max: {}, mean: {}, count: {}", min, max, (sum / count as f64), count)
 }
 
+fn epoch_duration_to_datetime(epoch: Duration) -> chrono::DateTime<chrono::Utc> {
+    let naive_datetime = NaiveDateTime::from_timestamp_nanos(epoch.as_nanos().try_into().unwrap()).unwrap();
+    Utc.from_utc_datetime(&naive_datetime)
+}
+
 fn main() -> Result<(), AnalyzeError> {
     init_logging();
     let args = Args::parse();
@@ -81,6 +89,22 @@ fn main() -> Result<(), AnalyzeError> {
         let lading_config = msg_stats.to_lading_config().expect("Error converting to lading config");
         let str_lading_config = serde_yaml::to_string(&lading_config)?;
         println!("Lading Config:\n{}", str_lading_config);
+    }
+
+    if let Some(reader_analytics) = msg_stats.reader_analytics {
+        println!("Reader Analytics:");
+        let first_timestamp = epoch_duration_to_datetime(reader_analytics.earliest_timestamp);
+        let last_timestamp = epoch_duration_to_datetime(reader_analytics.latest_timestamp);
+        println!("First packet time: {}", first_timestamp.to_rfc3339());
+        println!("Last packet time: {}", last_timestamp.to_rfc3339());
+        println!("Duration: {:?}", reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp);
+        println!("Total Packets: {}", reader_analytics.total_packets);
+        println!("Total Bytes: {}", reader_analytics.total_bytes);
+        println!("Total Messages: {}", reader_analytics.total_messages);
+
+        let duration = reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp;
+        let avg_throughput = reader_analytics.total_bytes as f64 / duration.as_secs_f64();
+        println!("Average Bytes Per Second:  {} per second", human_bytes(avg_throughput));
     }
 
     Ok(())

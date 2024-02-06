@@ -1,6 +1,7 @@
 use std::io::BufReader;
 use std::io::BufRead;
 use std::io::Read;
+use std::time::Duration;
 
 use bytes::{Bytes};
 use thiserror::Error;
@@ -22,6 +23,37 @@ pub enum DogStatsDReaderError {
     Pcap(#[from] PcapDogStatsDReaderError),
     #[error("IO Error")]
     Io(#[from] std::io::Error),
+    #[error("Unsupported Operation: {0}")]
+    UnsupportedOperation(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct Analytics {
+    pub total_packets: u64,
+    pub total_bytes: u64,
+    pub total_messages: u64,
+    /// First timestamp seen in the stream, nanoseconds since epoch
+    pub earliest_timestamp: Duration,
+    /// Most recent timestamp seen in the stream, nanoseconds since epoch
+    pub latest_timestamp: Duration,
+}
+
+impl Analytics {
+    pub fn new() -> Self {
+        Self {
+            total_packets: 0,
+            total_bytes: 0,
+            total_messages: 0,
+            earliest_timestamp: Duration::ZERO,
+            latest_timestamp: Duration::ZERO,
+        }
+    }
+}
+
+impl Default for Analytics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub enum DogStatsDReader<'a>
@@ -143,6 +175,16 @@ impl<'a> DogStatsDReader<'a>
             Self::Utf8(r) => Ok(r.read_msg(s)?),
             Self::Replay(r) => Ok(r.read_msg(s)?),
             Self::Pcap(r) => Ok(r.read_msg(s)?),
+        }
+    }
+
+    /// Returns a snapshot of the current analytics from the underlying reader
+    /// Only supported for readers that deal with packets
+    pub fn get_analytics(&mut self) -> Result<Option<Analytics>, DogStatsDReaderError> {
+        match self {
+            Self::Utf8(_r) => Ok(None),
+            Self::Replay(r) => Ok(Some(r.get_analytics()?)),
+            Self::Pcap(r) => Ok(Some(r.get_analytics()?)),
         }
     }
 }
