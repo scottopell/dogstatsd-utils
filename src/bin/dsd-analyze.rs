@@ -31,7 +31,7 @@ struct Args {
     input: Option<String>,
 
     /// Emit lading DSD config
-    #[arg(long, short, default_value_t = false)]
+    #[arg(long, short, default_value_t = true)]
     lading_config: bool,
 }
 
@@ -42,7 +42,15 @@ fn sketch_to_string(sketch: &DDSketch) -> String {
     let (Some(min), Some(max), Some(sum), count) = (sketch.min(), sketch.max(), sketch.sum(), sketch.count()) else {
         return "No data".to_string();
     };
-    format!("min: {}, max: {}, mean: {}, count: {}", min, max, (sum / count as f64), count)
+    let mean = sum / count as f64;
+    // should be safe to unwrap since we know we have data
+    let twenty = sketch.quantile(0.2).unwrap().unwrap();
+    let fourty = sketch.quantile(0.4).unwrap().unwrap();
+    let sixty = sketch.quantile(0.6).unwrap().unwrap();
+    let eighty = sketch.quantile(0.8).unwrap().unwrap();
+
+
+    format!("\tmin: {}\n\t0.2: {:.1}\n\t0.4: {:.1}\n\t0.5: {:.1}\n\t0.6: {:.1}\n\t0.8: {:.1}\n\tmax: {}\n\tcount: {}", min, twenty, fourty, mean, sixty, eighty, max, count)
 }
 
 fn epoch_duration_to_datetime(epoch: Duration) -> chrono::DateTime<chrono::Utc> {
@@ -65,46 +73,47 @@ fn main() -> Result<(), AnalyzeError> {
 
     let msg_stats = analyze_msgs(&mut reader)?;
 
-    println!("Total Messages:\n {}", msg_stats.num_msgs);
+    println!("Total Messages:\n\t{}", msg_stats.num_msgs);
     println!("Name Length:\n{}", sketch_to_string(&msg_stats.name_length));
     println!("# values per msg:\n{}", sketch_to_string(&msg_stats.num_values));
     println!("# tags per msg:\n{}", sketch_to_string(&msg_stats.num_tags));
     println!("# unicode tags per msg:\n{}", sketch_to_string(&msg_stats.num_unicode_tags));
+    println!("# of Unique Tags:\n\t{}", msg_stats.total_unique_tags);
+    println!("# of Contexts:\n\t{}", msg_stats.num_contexts);
+    println!();
     println!("Metric Kind Breakdown:");
     for (kind, (cnt, per_type)) in msg_stats.kind.iter() {
         if let Some(per_type) = per_type {
-            println!("{} Total {}", kind, cnt);
+            println!("\t{} Total {}", kind, cnt);
             for (t, cnt) in per_type.iter() {
-                println!("{}: {}", t, cnt);
+                println!("\t\t{}: {}", t, cnt);
             }
         } else {
-            println!("{}: {}", kind, cnt);
+            println!("\t{}: {}", kind, cnt);
         }
     }
     println!();
-    println!("# of Unique Tags: {}", msg_stats.total_unique_tags);
-    println!("# of Contexts: {}", msg_stats.num_contexts);
 
     if args.lading_config {
         let lading_config = msg_stats.to_lading_config().expect("Error converting to lading config");
         let str_lading_config = serde_yaml::to_string(&lading_config)?;
-        println!("Lading Config:\n{}", str_lading_config);
+        println!("Lading Config:\n---\n{}---", str_lading_config);
     }
 
     if let Some(reader_analytics) = msg_stats.reader_analytics {
         println!("Reader Analytics:");
         let first_timestamp = epoch_duration_to_datetime(reader_analytics.earliest_timestamp);
         let last_timestamp = epoch_duration_to_datetime(reader_analytics.latest_timestamp);
-        println!("First packet time: {}", first_timestamp.to_rfc3339());
-        println!("Last packet time: {}", last_timestamp.to_rfc3339());
-        println!("Duration: {:?}", reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp);
-        println!("Total Packets: {}", reader_analytics.total_packets);
-        println!("Total Bytes: {}", reader_analytics.total_bytes);
-        println!("Total Messages: {}", reader_analytics.total_messages);
+        println!("\tFirst packet time: {}", first_timestamp.to_rfc3339());
+        println!("\tLast packet time: {}", last_timestamp.to_rfc3339());
+        println!("\tDuration: {:?}", reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp);
+        println!("\tTotal Packets: {}", reader_analytics.total_packets);
+        println!("\tTotal Bytes: {}", human_bytes(reader_analytics.total_bytes as f64));
+        println!("\tTotal Messages: {}", reader_analytics.total_messages);
 
         let duration = reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp;
         let avg_throughput = reader_analytics.total_bytes as f64 / duration.as_secs_f64();
-        println!("Average Bytes Per Second:  {} per second", human_bytes(avg_throughput));
+        println!("\tAverage Bytes Per Second:  {} per second", human_bytes(avg_throughput));
     }
 
     Ok(())
