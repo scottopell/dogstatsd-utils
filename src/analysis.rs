@@ -100,6 +100,8 @@ impl DogStatsDBatchStats {
         lading_payload::dogstatsd::KindWeights::new(num_metrics, num_events, num_service_checks)
     }
 
+    /// Given a DogStatsDBatchStats, return a lading_payload::dogstatsd::Config
+    /// Correctly populates all payload parameters except for sampling
     pub fn to_lading_config(&self) -> Result<lading_payload::dogstatsd::Config, Error> {
         // could use min-max here, but I'm thinking that getting the 20th and 80th percentiles
         // may be more useful than the absolute min and max
@@ -119,6 +121,17 @@ impl DogStatsDBatchStats {
         };
         let tag_key_length = tag_length;
         let tag_value_length = tag_length;
+        let tags_per_msg = if let (Some(min), Some(max)) = (self.num_tags.quantile(0.2)?, self.num_tags.quantile(0.8)?) {
+            lading_payload::dogstatsd::ConfRange::Inclusive{min: min as u8, max: max as u8}
+        } else {
+            lading_payload::dogstatsd::ConfRange::Constant(0)
+        };
+
+        let multivalue_count = if let (Some(min), Some(max)) = (self.num_values.quantile(0.2)?, self.num_values.quantile(0.8)? ) {
+            lading_payload::dogstatsd::ConfRange::Inclusive{min: min as u16, max: max as u16}
+        } else {
+            lading_payload::dogstatsd::ConfRange::Constant(0)
+        };
 
         let multivalue_pack_probability = self.num_msgs_with_multivalue as f32 / (self.num_msgs) as f32;
 
@@ -128,16 +141,18 @@ impl DogStatsDBatchStats {
         Ok(lading_payload::dogstatsd::Config {
             contexts: num_contexts,
             kind_weights,
-            service_check_names: lading_payload::dogstatsd::ConfRange::Constant(0),// todo
+            service_check_names: name_length, // todo, track name length for service checks specifically
             name_length,
             tag_key_length,
             tag_value_length,
-            tags_per_msg: lading_payload::dogstatsd::ConfRange::Constant(0),// todo
+            tags_per_msg,
             multivalue_pack_probability,
-            multivalue_count: lading_payload::dogstatsd::ConfRange::Constant(0),// todo
+            multivalue_count,
             length_prefix_framed: false,
-            sampling_range: lading_payload::dogstatsd::ConfRange::Constant(0.0),// todo
-            sampling_probability: 0.0, // todo
+            // Sampling is not yet implemented, neither in DogStatsDMsg nor in the analysis code
+            // todo, implement sampling analysis
+            sampling_range: lading_payload::dogstatsd::ConfRange::Constant(0.0),
+            sampling_probability: 0.0,
             metric_weights,
             value: ValueConf::default(),
         })
