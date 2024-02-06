@@ -1,4 +1,5 @@
 
+use sketches_ddsketch::DDSketch;
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
@@ -31,6 +32,16 @@ struct Args {
     lading_config: bool,
 }
 
+/// Prints out a quick summary of a given sketch
+/// Future improvement would be a visual histogram in the terminal
+/// similar to what `histo` offered
+fn sketch_to_string(sketch: &DDSketch) -> String {
+    let (Some(min), Some(max), Some(sum), count) = (sketch.min(), sketch.max(), sketch.sum(), sketch.count()) else {
+        return "No data".to_string();
+    };
+    format!("min: {}, max: {}, mean: {}, count: {}", min, max, (sum / count as f64), count)
+}
+
 fn main() -> Result<(), AnalyzeError> {
     init_logging();
     let args = Args::parse();
@@ -46,10 +57,11 @@ fn main() -> Result<(), AnalyzeError> {
 
     let msg_stats = analyze_msgs(&mut reader)?;
 
-    println!("Name Length:\n{}", msg_stats.name_length);
-    println!("# values per msg:\n{}", msg_stats.num_values);
-    println!("# tags per msg:\n{}", msg_stats.num_tags);
-    println!("# unicode tags per msg:\n{}", msg_stats.num_unicode_tags);
+    println!("Total Messages:\n {}", msg_stats.num_msgs);
+    println!("Name Length:\n{}", sketch_to_string(&msg_stats.name_length));
+    println!("# values per msg:\n{}", sketch_to_string(&msg_stats.num_values));
+    println!("# tags per msg:\n{}", sketch_to_string(&msg_stats.num_tags));
+    println!("# unicode tags per msg:\n{}", sketch_to_string(&msg_stats.num_unicode_tags));
     println!("Metric Kind Breakdown:");
     for (kind, (cnt, per_type)) in msg_stats.kind.iter() {
         if let Some(per_type) = per_type {
@@ -66,7 +78,7 @@ fn main() -> Result<(), AnalyzeError> {
     println!("# of Contexts: {}", msg_stats.num_contexts);
 
     if args.lading_config {
-        let lading_config = msg_stats.to_lading_config();
+        let lading_config = msg_stats.to_lading_config().expect("Error converting to lading config");
         let str_lading_config = serde_yaml::to_string(&lading_config)?;
         println!("Lading Config:\n{}", str_lading_config);
     }

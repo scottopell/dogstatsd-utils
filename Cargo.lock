@@ -517,7 +517,6 @@ dependencies = [
  "clap 4.4.4",
  "criterion",
  "divan",
- "histo",
  "indicatif",
  "lading-payload",
  "lading-throttle",
@@ -531,6 +530,7 @@ dependencies = [
  "rand",
  "regex",
  "serde_yaml",
+ "sketches-ddsketch",
  "smallvec 2.0.0-alpha.1",
  "thiserror",
  "tokio",
@@ -757,15 +757,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "histo"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6a96a1c8acf372eefef3b065d800986a6d11abdc2c27cc61255513646b3df6c"
-dependencies = [
- "streaming-stats",
 ]
 
 [[package]]
@@ -1749,6 +1740,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sketches-ddsketch"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85636c14b73d81f541e525f585c0a2109e6744e1565b5c1668e31c70c10ed65c"
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1787,15 +1784,6 @@ checksum = "4031e820eb552adee9295814c0ced9e5cf38ddf1e8b7d566d6de8e2538ea989e"
 dependencies = [
  "libc",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "streaming-stats"
-version = "0.1.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbc32bf233385fb1ae0c4cf13a8dfd11efec71f6a9de95feac8c870788bc8b25"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]

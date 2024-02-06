@@ -14,7 +14,6 @@ bytes = "1.0.1"
 indicatif = "0.16.0"
 clap = { version = "4.3.23", features = ["derive"] }
 thiserror = "1.0"
-histo = "1.0.0"
 rand = { version = "0.8.5", default-features = false, features = ["small_rng", "std", "std_rng" ]}
 tokio = { version = "1.32", features = ["time"] }
 byte-unit = "4.0"
@@ -29,6 +28,7 @@ lading-payload = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.5
 lading-throttle = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.5" }
 pnet = "0.34.0"
 serde_yaml = "0.9.31"
+sketches-ddsketch = "0.2.2"
 
 
 
