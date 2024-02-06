@@ -144,14 +144,14 @@ async fn main() -> Result<(), DSDGenerateError> {
 
     if let Some(num_msgs) = args.num_msgs {
         for _ in 0..num_msgs {
-            println!("{}", dd.generate(&mut rng));
+            println!("{}", dd.generate(&mut rng).unwrap());
         }
     } else if let Some(rate) = args.rate {
         match parse_rate(&rate) {
             Some(RateSpecification::TimerBased(hz_value)) => loop {
                 let sleep_in_ms = 1000 / (hz_value as u64);
                 sleep(Duration::from_millis(sleep_in_ms)).await;
-                println!("{}", dd.generate(&mut rng));
+                println!("{}", dd.generate(&mut rng).unwrap());
             },
             Some(RateSpecification::ThroughputBased(bytes_per_second)) => {
                 let mut throttle = Throttle::new_with_config(
@@ -159,7 +159,7 @@ async fn main() -> Result<(), DSDGenerateError> {
                     NonZeroU32::new(bytes_per_second).unwrap(),
                 );
                 loop {
-                    let msg = dd.generate(&mut rng);
+                    let msg = dd.generate(&mut rng).unwrap();
                     let msg_str = msg.to_string();
                     let _ = throttle
                         .wait_for(NonZeroU32::new(msg_str.len() as u32).unwrap())
@@ -172,7 +172,7 @@ async fn main() -> Result<(), DSDGenerateError> {
             }
         }
     } else {
-        println!("{}", dd.generate(&mut rng));
+        println!("{}", dd.generate(&mut rng).unwrap());
     }
 
     Ok(())

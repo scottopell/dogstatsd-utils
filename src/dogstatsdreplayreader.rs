@@ -88,7 +88,7 @@ impl<'a> DogStatsDReplayReader<'a>
             Ok(reader) => Ok(DogStatsDReplayReader {
                 replay_msg_reader: reader,
                 current_messages: VecDeque::new(),
-                analytics: dogstatsdreader::Analytics::new(),
+                analytics: dogstatsdreader::Analytics::new(dogstatsdreader::Transport::UnixDatagram),
             }),
             Err(e) => match e {
                 ReplayReaderError::NotAReplayFile => {

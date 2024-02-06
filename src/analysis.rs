@@ -35,6 +35,8 @@ pub struct DogStatsDBatchStats {
 pub enum Error {
     #[error("Error retrieving data from sketch: {0}")]
     DDSketchError(#[from] sketches_ddsketch::DDSketchError),
+    #[error("Not enough information to comput requested data.")]
+    NotEnoughInfo,
 }
 
 impl DogStatsDBatchStats {
@@ -101,9 +103,35 @@ impl DogStatsDBatchStats {
         lading_payload::dogstatsd::KindWeights::new(num_metrics, num_events, num_service_checks)
     }
 
+    pub fn to_lading_config(&self) -> Result<lading::generator::Config, Error> {
+        let payload_config = self.to_lading_payload_config()?;
+        let generator_config = self.to_lading_generator_config(lading_payload::Config::DogStatsD(payload_config))?;
+
+        Ok(generator_config)
+    }
+
+    /// Given a DogStatsDBatchStats, return a lading_
+    /// Correctly populates all payload parameters except for sampling
+    pub fn to_lading_generator_config(&self, variant: lading_payload::Config) -> Result<lading::generator::Config, Error> {
+        let Some(ref analytics) = self.reader_analytics else {
+            return Err(Error::NotEnoughInfo);
+        };
+
+        let inner_config = analytics.to_lading_generator_config(variant);
+
+        let config = lading::generator::Config {
+            general: lading::generator::General {
+                id: None,
+            },
+            inner: inner_config,
+        };
+
+        Ok(config)
+    }
+
     /// Given a DogStatsDBatchStats, return a lading_payload::dogstatsd::Config
     /// Correctly populates all payload parameters except for sampling
-    pub fn to_lading_config(&self) -> Result<lading_payload::dogstatsd::Config, Error> {
+    pub fn to_lading_payload_config(&self) -> Result<lading_payload::dogstatsd::Config, Error> {
         // could use min-max here, but I'm thinking that getting the 20th and 80th percentiles
         // may be more useful than the absolute min and max
         let name_length = if let (Some(min), Some(max)) = (self.name_length.quantile(0.2)?, self.name_length.quantile(0.8)?) {
@@ -431,6 +459,13 @@ mod tests {
         stats.name_length.add(10.0);
 
         let lading_config = stats.to_lading_config().unwrap();
+        let name_length = match lading_config.inner {
+            lading::generator::Inner::DogStatsD(lading_payload::dogstatsd::Config {
+                name_length,
+                ..
+            }) => name_length,
+            _ => panic!("Wrong config type"),
+        };
         assert_eq!(lading_config.name_length, lading_payload::dogstatsd::ConfRange::Inclusive{min: 10, max: 10});
     }
 

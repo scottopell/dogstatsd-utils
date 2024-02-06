@@ -27,7 +27,7 @@ impl<'a> PcapDogStatsDReader<'a>
             Ok(reader) => Ok(PcapDogStatsDReader {
                 pcap_reader: reader,
                 current_messages: VecDeque::new(),
-                analytics: dogstatsdreader::Analytics::new(),
+                analytics: dogstatsdreader::Analytics::new(dogstatsdreader::Transport::Udp),
             }),
             Err(e) => Err(PcapDogStatsDReaderError::PcapReader(e)),
         }

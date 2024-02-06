@@ -106,14 +106,12 @@ fn main() -> Result<(), AnalyzeError> {
         let last_timestamp = epoch_duration_to_datetime(reader_analytics.latest_timestamp);
         println!("\tFirst packet time: {}", first_timestamp.to_rfc3339());
         println!("\tLast packet time: {}", last_timestamp.to_rfc3339());
-        println!("\tDuration: {:?}", reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp);
+        println!("\tDuration: {:?}", reader_analytics.duration());
         println!("\tTotal Packets: {}", reader_analytics.total_packets);
         println!("\tTotal Bytes: {}", human_bytes(reader_analytics.total_bytes as f64));
         println!("\tTotal Messages: {}", reader_analytics.total_messages);
 
-        let duration = reader_analytics.latest_timestamp - reader_analytics.earliest_timestamp;
-        let avg_throughput = reader_analytics.total_bytes as f64 / duration.as_secs_f64();
-        println!("\tAverage Bytes Per Second:  {} per second", human_bytes(avg_throughput));
+        println!("\tAverage Bytes Per Second:  {} per second", human_bytes(reader_analytics.average_bytes_per_second()));
     }
 
     Ok(())
