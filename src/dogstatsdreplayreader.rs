@@ -1,9 +1,9 @@
-use std::{collections::VecDeque, str::Utf8Error, io::{BufRead}};
+use std::{collections::VecDeque, io::BufRead, str::Utf8Error, time::Duration};
 use thiserror::Error;
 
 
 
-use crate::replay::{ReplayReader, ReplayReaderError};
+use crate::{dogstatsdreader, replay::{ReplayReader, ReplayReaderError}};
 
 pub mod dogstatsd {
     pub mod unix {
@@ -25,18 +25,41 @@ pub struct DogStatsDReplayReader<'a>
 {
     replay_msg_reader: ReplayReader<'a>,
     current_messages: VecDeque<String>,
+    analytics: dogstatsdreader::Analytics,
 }
 
 impl<'a> DogStatsDReplayReader<'a>
 {
+    pub fn get_analytics(&self) -> Result<dogstatsdreader::Analytics, DogStatsDReplayReaderError> {
+        Ok(self.analytics.clone())
+    }
     pub fn read_msg(&mut self, s: &mut String) -> Result<usize, DogStatsDReplayReaderError> {
         if let Some(line) = self.current_messages.pop_front() {
             s.insert_str(0, &line);
+            self.analytics.total_messages += 1;
             return Ok(1);
         }
 
         match self.replay_msg_reader.read_msg() {
             Ok(Some(msg)) => {
+                let timestamp = match self.replay_msg_reader.version {
+                    crate::replay::CaptureFileVersion::V3 => {
+                        Duration::from_nanos(msg.timestamp as u64)
+                    },
+                    crate::replay::CaptureFileVersion::V2 => {
+                        Duration::from_secs(msg.timestamp as u64)
+                    },
+                    _ => {
+                        panic!("Unexpected version in DogStatsDReplayReader::read_msg");
+                    }
+                };
+                if self.analytics.earliest_timestamp.is_zero() {
+                    self.analytics.earliest_timestamp = timestamp;
+                } else {
+                    self.analytics.latest_timestamp = timestamp;
+                }
+                self.analytics.total_packets += 1;
+                self.analytics.total_bytes += msg.payload.len() as u64;
                 match std::str::from_utf8(&msg.payload) {
                     Ok(v) => {
                         if v.is_empty() {
@@ -65,6 +88,7 @@ impl<'a> DogStatsDReplayReader<'a>
             Ok(reader) => Ok(DogStatsDReplayReader {
                 replay_msg_reader: reader,
                 current_messages: VecDeque::new(),
+                analytics: dogstatsdreader::Analytics::new(dogstatsdreader::Transport::UnixDatagram),
             }),
             Err(e) => match e {
                 ReplayReaderError::NotAReplayFile => {

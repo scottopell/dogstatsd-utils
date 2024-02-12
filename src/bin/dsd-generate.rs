@@ -113,45 +113,38 @@ async fn main() -> Result<(), DSDGenerateError> {
         None => dogstatsd::ConfRange::Inclusive { min: 100, max: 500 },
     };
     let length_prefix_framed = false;
-    let dd = dogstatsd::DogStatsD::new(
-        // Contexts
-        context_range,
-        // Service check name length
-        dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-        // name length
-        dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-        // tag_key_length
-        dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-        // tag_value_length
-        dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-        // tags_per_msg
-        dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
-        // multivalue_count
-        dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
-        // multivalue_pack_probability
-        0.08,
-        // sample_rate_range
-        dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
-        // sample_rate_choose_probability
-        0.50,
-        KindWeights::default(),
+    let dogstatsd_config = dogstatsd::Config{
+        contexts: context_range,
+        service_check_names: dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+        name_length: dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+        tag_key_length: dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+        tag_value_length: dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
+        tags_per_msg: dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
+        multivalue_count: dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
+        multivalue_pack_probability: 0.08,
+        sampling_range: dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
+        sampling_probability: 0.50,
+        kind_weights: KindWeights::default(),
         metric_weights,
-        ValueConf::default(),
+        value: ValueConf::default(),
         length_prefix_framed,
+    };
+    let dd = dogstatsd::DogStatsD::new(
+        dogstatsd_config,
         &mut rng,
     )
     .expect("Failed to create dogstatsd generator");
 
     if let Some(num_msgs) = args.num_msgs {
         for _ in 0..num_msgs {
-            println!("{}", dd.generate(&mut rng));
+            println!("{}", dd.generate(&mut rng).unwrap());
         }
     } else if let Some(rate) = args.rate {
         match parse_rate(&rate) {
             Some(RateSpecification::TimerBased(hz_value)) => loop {
                 let sleep_in_ms = 1000 / (hz_value as u64);
                 sleep(Duration::from_millis(sleep_in_ms)).await;
-                println!("{}", dd.generate(&mut rng));
+                println!("{}", dd.generate(&mut rng).unwrap());
             },
             Some(RateSpecification::ThroughputBased(bytes_per_second)) => {
                 let mut throttle = Throttle::new_with_config(
@@ -159,7 +152,7 @@ async fn main() -> Result<(), DSDGenerateError> {
                     NonZeroU32::new(bytes_per_second).unwrap(),
                 );
                 loop {
-                    let msg = dd.generate(&mut rng);
+                    let msg = dd.generate(&mut rng).unwrap();
                     let msg_str = msg.to_string();
                     let _ = throttle
                         .wait_for(NonZeroU32::new(msg_str.len() as u32).unwrap())
@@ -172,7 +165,7 @@ async fn main() -> Result<(), DSDGenerateError> {
             }
         }
     } else {
-        println!("{}", dd.generate(&mut rng));
+        println!("{}", dd.generate(&mut rng).unwrap());
     }
 
     Ok(())

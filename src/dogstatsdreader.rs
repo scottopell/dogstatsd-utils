@@ -1,15 +1,16 @@
 use std::io::BufReader;
 use std::io::BufRead;
 use std::io::Read;
+use std::time::Duration;
 
-use bytes::{Bytes};
+use bytes::Bytes;
 use thiserror::Error;
 use tracing::{debug, error, info};
 
 use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
     pcapdogstatsdreader::{PcapDogStatsDReader, PcapDogStatsDReaderError},
-    replay::{ReplayReaderError},
+    replay::ReplayReaderError,
     utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
@@ -22,6 +23,92 @@ pub enum DogStatsDReaderError {
     Pcap(#[from] PcapDogStatsDReaderError),
     #[error("IO Error")]
     Io(#[from] std::io::Error),
+    #[error("Unsupported Operation: {0}")]
+    UnsupportedOperation(String),
+}
+
+#[derive(Clone, Debug)]
+pub enum Transport {
+    Udp,
+    UnixDatagram,
+    // UnixStream, not supported yet
+}
+
+impl std::fmt::Display for Transport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Transport::Udp => write!(f, "UDP"),
+            Transport::UnixDatagram => write!(f, "Unix Datagram"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Analytics {
+    pub total_packets: u64,
+    pub total_bytes: u64,
+    pub total_messages: u64,
+    /// First timestamp seen in the stream, nanoseconds since epoch
+    pub earliest_timestamp: Duration,
+    /// Most recent timestamp seen in the stream, nanoseconds since epoch
+    pub latest_timestamp: Duration,
+    /// Original transport type of the stream
+    pub transport_type: Transport,
+}
+
+impl Analytics {
+    pub fn new(transport_type: Transport) -> Self {
+        Self {
+            total_packets: 0,
+            total_bytes: 0,
+            total_messages: 0,
+            earliest_timestamp: Duration::ZERO,
+            latest_timestamp: Duration::ZERO,
+            transport_type,
+        }
+    }
+
+    pub fn duration(&self) -> Duration {
+        self.latest_timestamp - self.earliest_timestamp
+    }
+    pub fn average_bytes_per_second(&self) -> f64 {
+        if self.duration().as_secs() == 0 {
+            return 0.0;
+        }
+        self.total_bytes as f64 / self.duration().as_secs() as f64
+    }
+
+    pub fn to_lading_generator_config(&self, variant: lading_payload::Config) -> lading::generator::Inner {
+        // todo better default seed
+        let seed: [u8; 32] = [12; 32];
+        let bytes_per_second = byte_unit::Byte::from_bytes(self.average_bytes_per_second() as u128);
+        let maximum_prebuild_cache_size_bytes = byte_unit::Byte::from_unit(20.0, byte_unit::ByteUnit::MB).unwrap();
+        let throttle = lading_throttle::Config::Stable;
+        match self.transport_type {
+            Transport::Udp => lading::generator::Inner::Udp(lading::generator::udp::Config {
+                seed,
+                addr: "fill_me_in".to_string(),
+                variant,
+                bytes_per_second,
+                maximum_prebuild_cache_size_bytes,
+                block_sizes: None,
+                throttle,
+            }),
+            Transport::UnixDatagram => lading::generator::Inner::UnixDatagram(lading::generator::unix_datagram::Config {
+                seed,
+                path: "fill_me_in".into(),
+                variant,
+                bytes_per_second,
+                maximum_prebuild_cache_size_bytes,
+                block_sizes: None,
+                throttle,
+                block_cache_method: lading_payload::block::default_cache_method(),
+                parallel_connections: 1,
+            }),
+        }
+    }
+
+
 }
 
 pub enum DogStatsDReader<'a>
@@ -143,6 +230,16 @@ impl<'a> DogStatsDReader<'a>
             Self::Utf8(r) => Ok(r.read_msg(s)?),
             Self::Replay(r) => Ok(r.read_msg(s)?),
             Self::Pcap(r) => Ok(r.read_msg(s)?),
+        }
+    }
+
+    /// Returns a snapshot of the current analytics from the underlying reader
+    /// Only supported for readers that deal with packets
+    pub fn get_analytics(&mut self) -> Result<Option<Analytics>, DogStatsDReaderError> {
+        match self {
+            Self::Utf8(_r) => Ok(None),
+            Self::Replay(r) => Ok(Some(r.get_analytics()?)),
+            Self::Pcap(r) => Ok(Some(r.get_analytics()?)),
         }
     }
 }

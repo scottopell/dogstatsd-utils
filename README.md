@@ -32,7 +32,10 @@ Options:
 
 This tool takes in a stream of text dogstatsd messages either from a file or
 from stdin. These can be zstd encoded, replay files, or utf-8 encoded text.
-Prints out some basic histograms about the messages (metric name length, # of tags, etc)
+
+Analysis covers:
+- "Reader" -- how many packets were there, how big was each one, how many bytes-per-second, etc.
+- "Message" -- How many messages were metrics vs service checks, how many tags were there per metric, etc.
 
 ```
 $ dsd-analyze --help
@@ -44,9 +47,11 @@ Arguments:
   [INPUT]  File containing dogstatsd data
 
 Options:
+  -l, --lading-config  Emit lading DSD config
   -h, --help     Print help
   -V, --version  Print version
 ```
+
 
 ## `dsd-generate`
 > Install via `cargo install --git https://github.com/scottopell/dogstatsd-utils --bin dsd-generate`

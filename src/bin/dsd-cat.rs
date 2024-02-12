@@ -1,7 +1,6 @@
 use std::fs;
 use std::fs::File;
 use std::io::stdout;
-use std::io::Error;
 
 use std::io::{self};
 use std::path::Path;

@@ -14,20 +14,26 @@ bytes = "1.0.1"
 indicatif = "0.16.0"
 clap = { version = "4.3.23", features = ["derive"] }
 thiserror = "1.0"
-histo = "1.0.0"
 rand = { version = "0.8.5", default-features = false, features = ["small_rng", "std", "std_rng" ]}
 tokio = { version = "1.32", features = ["time"] }
 byte-unit = "4.0"
-regex = "1.9.5"
+regex = "1.10.3"
 lazy_static = "1.4.0"
 tracing = { version = "0.1", default-features = false, features = ["std", "attributes"]  }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["smallvec", "fmt", "tracing-log", "std", "env-filter", "json"] }
 divan = "0.1.5"
 smallvec = "2.0.0-alpha.1"
 pcap-file = "2.0.0-rc1"
-lading-payload = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.5" }
-lading-throttle = { git = "https://github.com/DataDog/lading.git", tag = "v0.20.5" }
+lading-payload = { git = "https://github.com/DataDog/lading.git", rev = "cd7bd9d477707d375b2f841e361587af48d30e88" }
+lading-throttle = { git = "https://github.com/DataDog/lading.git", rev = "cd7bd9d477707d375b2f841e361587af48d30e88" }
+lading = { git = "https://github.com/DataDog/lading.git", rev = "cd7bd9d477707d375b2f841e361587af48d30e88"  }
 pnet = "0.34.0"
+serde = { version = "*", features = ["derive"]}
+serde_yaml = "0.9.31"
+sketches-ddsketch = "0.2.2"
+chrono = "0.4.33"
+human_bytes = "0.4.3"
+serde_json = "1.0.113"
 
 
 
