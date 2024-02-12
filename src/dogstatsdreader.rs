@@ -3,14 +3,14 @@ use std::io::BufRead;
 use std::io::Read;
 use std::time::Duration;
 
-use bytes::{Bytes};
+use bytes::Bytes;
 use thiserror::Error;
 use tracing::{debug, error, info};
 
 use crate::{
     dogstatsdreplayreader::{DogStatsDReplayReader, DogStatsDReplayReaderError},
     pcapdogstatsdreader::{PcapDogStatsDReader, PcapDogStatsDReaderError},
-    replay::{ReplayReaderError},
+    replay::ReplayReaderError,
     utf8dogstatsdreader::Utf8DogStatsDReader,
     zstd::is_zstd,
 };
@@ -32,6 +32,15 @@ pub enum Transport {
     Udp,
     UnixDatagram,
     // UnixStream, not supported yet
+}
+
+impl std::fmt::Display for Transport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Transport::Udp => write!(f, "UDP"),
+            Transport::UnixDatagram => write!(f, "Unix Datagram"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

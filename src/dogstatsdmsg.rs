@@ -28,6 +28,7 @@ impl DogStatsDMsgError {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum DogStatsDMsg<'a> {
     Metric(DogStatsDMetricStr<'a>),
     Event(DogStatsDEventStr<'a>),
@@ -121,7 +122,7 @@ pub struct DogStatsDServiceCheckStr<'a> {
 #[derive(Debug)]
 pub struct DogStatsDMetricStr<'a> {
     pub name: &'a str,
-    pub values: &'a str,
+    pub values: SmallVec<f64, MAX_TAGS>,
     pub sample_rate: Option<&'a str>,
     pub timestamp: Option<&'a str>,
     pub container_id: Option<&'a str>,
@@ -324,7 +325,20 @@ impl<'a> DogStatsDMsg<'a> {
                     }
                 };
                 let name = name_and_values.0;
-                let values = name_and_values.1;
+                let str_values = name_and_values.1;
+                let mut values = smallvec![];
+                for part in str_values.split(':') {
+                    match part.parse::<f64>() {
+                        Ok(v) => {values.push(v);}
+                        Err(_) => {
+                            return Err(DogStatsDMsgError::new_parse_error(
+                                DogStatsDMsgKind::Metric,
+                                "Invalid or no value found",
+                                str_msg.to_owned(),
+                            ))
+                        }
+                    }
+                }
 
                 let metric_type: DogStatsDMetricType = match parts.get(1) {
                     Some(s) => {
@@ -501,7 +515,7 @@ impl Debug for DogStatsDMsg {
 
 #[cfg(test)]
 mod tests {
-    use lading_payload::dogstatsd::{self, KindWeights, MetricWeights, ValueConf};
+    use lading_payload::dogstatsd::{self};
     use rand::{rngs::SmallRng, SeedableRng};
 
     use super::*;
@@ -530,7 +544,8 @@ mod tests {
 
                 assert_eq!(msg.raw_msg, $input);
                 assert_eq!(msg.name, $expected_name);
-                assert_eq!(msg.values, $expected_values);
+                let expected_values: SmallVec<f64, MAX_TAGS> = $expected_values;
+                assert_eq!(msg.values, expected_values);
                 assert_eq!(msg.metric_type, $expected_type);
                 let expected_tags: SmallVec<&str, MAX_TAGS> = $expected_tags;
                 assert_eq!(msg.tags, expected_tags);
@@ -583,7 +598,7 @@ mod tests {
         basic_metric,
         "metric.name:1|c",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec![],
         None,
@@ -596,7 +611,7 @@ mod tests {
         basic_gauge,
         "metric.name:1|g",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Gauge,
         smallvec![],
         None,
@@ -609,7 +624,7 @@ mod tests {
         basic_histogram,
         "metric.name:1|h",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Histogram,
         smallvec![],
         None,
@@ -622,7 +637,7 @@ mod tests {
         basic_timer,
         "metric.name:1|ms",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Timer,
         smallvec![],
         None,
@@ -635,7 +650,7 @@ mod tests {
         basic_set,
         "metric.name:1|s",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Set,
         smallvec![],
         None,
@@ -648,7 +663,7 @@ mod tests {
         basic_gauge_floating_value,
         "metric.name:1.321|g",
         "metric.name",
-        "1.321",
+        smallvec![1.321],
         DogStatsDMetricType::Gauge,
         smallvec![],
         None,
@@ -661,7 +676,7 @@ mod tests {
         basic_dist_floating_value,
         "metric.name:1.321|d",
         "metric.name",
-        "1.321",
+        smallvec![1.321],
         DogStatsDMetricType::Distribution,
         smallvec![],
         None,
@@ -674,7 +689,7 @@ mod tests {
         basic_dist_multi_floating_value,
         "metric.name:1.321:1.11111|d",
         "metric.name",
-        "1.321:1.11111",
+        smallvec![1.321, 1.11111],
         DogStatsDMetricType::Distribution,
         smallvec![],
         None,
@@ -687,7 +702,7 @@ mod tests {
         metric_with_container_id,
         "metric.name:1|c|c:container123",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec![],
         None,
@@ -700,7 +715,7 @@ mod tests {
         metric_with_everything,
         "metric.name:1|c|@0.5|T1234567890|c:container123|#tag1:value1,tag2",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec!["tag1:value1", "tag2"],
         Some("0.5"),
@@ -713,7 +728,7 @@ mod tests {
         metric_with_mixed_order,
         "metric.name:1|c|#tag1:value1,tag2|@0.5|c:container123|T1234567890",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec!["tag1:value1", "tag2"],
         Some("0.5"),
@@ -726,7 +741,7 @@ mod tests {
         metric_with_multiple_tags,
         "metric.name:1|c|#tag1:value1,tag2,tag3:another",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec!["tag1:value1", "tag2", "tag3:another"],
         None,
@@ -739,7 +754,7 @@ mod tests {
         metric_with_no_optional_fields,
         "metric.name:1|c",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec![],
         None,
@@ -752,7 +767,7 @@ mod tests {
         metric_with_unrecognized_field,
         "metric.name:1|c|x:unknown",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec![],
         None,
@@ -765,20 +780,20 @@ mod tests {
         malformed_metric_missing_value,
         "metric.name:|c",
         "metric.name",
-        "",
+        smallvec![],
         DogStatsDMetricType::Count,
         smallvec![],
         None,
         None,
         None,
-        NO_ERR // should be an error probably
+        Some((DogStatsDMsgKind::Metric, "Invalid or no value found"))
     );
 
     metric_test!(
         malformed_metric_invalid_format,
         "metric.name|1|c",
         "metric.name",
-        "1",
+        smallvec![1.0],
         DogStatsDMetricType::Count,
         smallvec![],
         None,
@@ -791,7 +806,7 @@ mod tests {
         security_msg,
         "datadog.security_agent.compliance.inputs.duration_ms:19.489043|ms|#dd.internal.entity_id:484d54a7-8851-490f-9efa-9fd7f870cdb8,env:staging,service:datadog-agent,rule_id:xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly,rule_input_type:xccdf,agent_version:7.48.0-rc.0+git.217.1425a0f",
         "datadog.security_agent.compliance.inputs.duration_ms",
-        "19.489043",
+        smallvec![19.489043],
         DogStatsDMetricType::Timer,
         smallvec!["dd.internal.entity_id:484d54a7-8851-490f-9efa-9fd7f870cdb8", "env:staging", "service:datadog-agent", "rule_id:xccdf_org.ssgproject.content_rule_file_permissions_cron_monthly", "rule_input_type:xccdf", "agent_version:7.48.0-rc.0+git.217.1425a0f"],
         None,
@@ -884,40 +899,12 @@ mod tests {
     #[test]
     fn lading_test() {
         let mut rng = SmallRng::seed_from_u64(34512423); // todo use random seed
-        let length_prefix_framed = false;
-        let dd = dogstatsd::DogStatsD::new(
-            // Contexts
-            dogstatsd::ConfRange::Inclusive {
-                min: 500,
-                max: 10000,
-            },
-            // Service check name length
-            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-            // name length
-            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-            // tag_key_length
-            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-            // tag_value_length
-            dogstatsd::ConfRange::Inclusive { min: 5, max: 10 },
-            // tags_per_msg
-            dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
-            // multivalue_count
-            dogstatsd::ConfRange::Inclusive { min: 1, max: 10 },
-            // multivalue_pack_probability
-            0.08,
-            dogstatsd::ConfRange::Inclusive { min: 0.1, max: 1.0 },
-            // multivalue_pack_probability
-            0.50,
-            KindWeights::default(),
-            MetricWeights::default(),
-            ValueConf::default(),
-            length_prefix_framed,
-            &mut rng,
-        )
+        let config = dogstatsd::Config::default();
+        let dd = dogstatsd::DogStatsD::new(config, &mut rng)
         .expect("Failed to create dogstatsd generator");
 
         for _ in 0..500_000 {
-            let lading_msg = dd.generate(&mut rng);
+            let lading_msg = dd.generate(&mut rng).unwrap();
             let str_lading_msg = format!("{}", lading_msg);
             let msg = DogStatsDMsg::new(str_lading_msg.as_str()).unwrap();
             match lading_msg {

@@ -7,7 +7,7 @@ use std::{
 };
 
 use thiserror::Error;
-use lading_payload::dogstatsd::{ValueConf, KindWeights, MetricWeights};
+use lading_payload::dogstatsd::{KindWeights, MetricWeights};
 
 use crate::{
     dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsg, DogStatsDMsgKind},
@@ -20,6 +20,8 @@ type KindMap = HashMap<DogStatsDMsgKind, KindCount>;
 pub struct DogStatsDBatchStats {
     pub name_length: DDSketch,
     pub num_values: DDSketch,
+    pub value_range: DDSketch,
+    pub values_that_are_floats: u32,
     pub num_tags: DDSketch,
     pub tag_total_length: DDSketch,
     pub num_unicode_tags: DDSketch,
@@ -35,8 +37,42 @@ pub struct DogStatsDBatchStats {
 pub enum Error {
     #[error("Error retrieving data from sketch: {0}")]
     DDSketchError(#[from] sketches_ddsketch::DDSketchError),
-    #[error("Not enough information to comput requested data.")]
+    #[error("Yaml error")]
+    Yaml(#[from] serde_yaml::Error),
+    #[error("Not enough information to compute requested data.")]
     NotEnoughInfo,
+}
+
+/// Given a DDSketch, return a lading_payload::dogstatsd::ConfRange based on the 20th and 80th percentiles
+/// Returns None if sketch is empty or if either percentile would exceed the given T
+fn sketch_to_confrange<T>(sketch: &DDSketch) -> Option<lading_payload::dogstatsd::ConfRange<T>> where T: PartialOrd + Copy + TryFrom<u64> {
+    if sketch.count() == 0 {
+        return None;
+    }
+    // quantiles are valid if the count is greater than 0
+    let (Some(min), Some(max)) = (sketch.quantile(0.2).unwrap(), sketch.quantile(0.8).unwrap()) else {
+        return None;
+    };
+    let min = min as u64;
+    let max = max as u64;
+
+    if min == max {
+        let val = match T::try_from(min) {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+        Some(lading_payload::dogstatsd::ConfRange::Constant(val))
+    } else {
+        let min = match T::try_from(min) {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+        let max = match T::try_from(max) {
+            Ok(v) => v,
+            Err(_) => return None,
+        };
+        Some(lading_payload::dogstatsd::ConfRange::Inclusive{min, max})
+    }
 }
 
 impl DogStatsDBatchStats {
@@ -103,6 +139,20 @@ impl DogStatsDBatchStats {
         lading_payload::dogstatsd::KindWeights::new(num_metrics, num_events, num_service_checks)
     }
 
+    pub fn to_lading_config_str(&self) -> Result<String, Error> {
+        #[derive(serde::Serialize)]
+        struct MyConfig {
+            #[serde(with = "serde_yaml::with::singleton_map_recursive")]
+            generators: Vec<lading::generator::Config>,
+        }
+        let config = self.to_lading_config()?;
+        let wrapped_config = MyConfig {
+            generators: vec![config],
+        };
+
+        Ok(serde_yaml::to_string(&wrapped_config)?)
+    }
+
     pub fn to_lading_config(&self) -> Result<lading::generator::Config, Error> {
         let payload_config = self.to_lading_payload_config()?;
         let generator_config = self.to_lading_generator_config(lading_payload::Config::DogStatsD(payload_config))?;
@@ -130,61 +180,55 @@ impl DogStatsDBatchStats {
     }
 
     /// Given a DogStatsDBatchStats, return a lading_payload::dogstatsd::Config
-    /// Correctly populates all payload parameters except for sampling
+    /// To-be-implemented:
+    /// - sampling rate and sampling value range
+    /// - value configuration
+    /// - service check names
     pub fn to_lading_payload_config(&self) -> Result<lading_payload::dogstatsd::Config, Error> {
-        // could use min-max here, but I'm thinking that getting the 20th and 80th percentiles
-        // may be more useful than the absolute min and max
-        let name_length = if let (Some(min), Some(max)) = (self.name_length.quantile(0.2)?, self.name_length.quantile(0.8)?) {
-            lading_payload::dogstatsd::ConfRange::Inclusive{min: min as u16, max: max as u16}
-        } else {
-            // todo, how to re-use default from lading_payload::dogstatsd
-            lading_payload::dogstatsd::ConfRange::Constant(10)
-        };
+        let dsd_config_defaults = lading_payload::dogstatsd::Config::default();
+
+        let name_length = sketch_to_confrange(&self.name_length);
         let num_contexts = lading_payload::dogstatsd::ConfRange::Constant(self.num_contexts);
 
-        let tag_length = if let (Some(min), Some(max)) = (self.tag_total_length.quantile(0.2)?, self.tag_total_length.quantile(0.8)?) {
-            lading_payload::dogstatsd::ConfRange::Inclusive{min: min as u8, max: max as u8}
-        } else {
-            // todo, how to re-use default from lading_payload::dogstatsd
-            lading_payload::dogstatsd::ConfRange::Constant(20)
-        };
-        let tag_key_length = tag_length;
-        let tag_value_length = tag_length;
-        let tags_per_msg = if let (Some(min), Some(max)) = (self.num_tags.quantile(0.2)?, self.num_tags.quantile(0.8)?) {
-            lading_payload::dogstatsd::ConfRange::Inclusive{min: min as u8, max: max as u8}
-        } else {
-            lading_payload::dogstatsd::ConfRange::Constant(0)
+        let value_float_prob = self.values_that_are_floats as f32 / (self.value_range.count()) as f32;
+        let value_range = match sketch_to_confrange(&self.value_range) {
+            Some(v) => Some(lading_payload::dogstatsd::ValueConf::new(value_float_prob, v)),
+            None => None,
         };
 
-        let multivalue_count = if let (Some(min), Some(max)) = (self.num_values.quantile(0.2)?, self.num_values.quantile(0.8)? ) {
-            lading_payload::dogstatsd::ConfRange::Inclusive{min: min as u16, max: max as u16}
-        } else {
-            lading_payload::dogstatsd::ConfRange::Constant(0)
-        };
+        let tag_length = sketch_to_confrange(&self.tag_total_length);
+        let tag_key_length = tag_length;
+        let tag_value_length = tag_length;
+
+        let tags_per_msg = sketch_to_confrange(&self.num_tags);
+
+        let multivalue_count = sketch_to_confrange(&self.num_values);
 
         let multivalue_pack_probability = self.num_msgs_with_multivalue as f32 / (self.num_msgs) as f32;
 
         let kind_weights = self.get_kind_weights();
         let metric_weights = self.get_metric_weights();
 
-        Ok(lading_payload::dogstatsd::Config {
+        let config = lading_payload::dogstatsd::Config {
             contexts: num_contexts,
             kind_weights,
-            service_check_names: name_length, // todo, track name length for service checks specifically
-            name_length,
-            tag_key_length,
-            tag_value_length,
-            tags_per_msg,
+            service_check_names: name_length.unwrap_or(dsd_config_defaults.name_length),
+            name_length: name_length.unwrap_or(dsd_config_defaults.name_length),
+            tag_key_length: tag_key_length.unwrap_or(dsd_config_defaults.tag_key_length),
+            tag_value_length: tag_value_length.unwrap_or(dsd_config_defaults.tag_value_length),
+            tags_per_msg: tags_per_msg.unwrap_or(dsd_config_defaults.tags_per_msg),
             multivalue_pack_probability,
-            multivalue_count,
+            multivalue_count: multivalue_count.unwrap_or(dsd_config_defaults.multivalue_count),
             length_prefix_framed: false,
-            // Sampling is not yet implemented, neither in DogStatsDMsg nor in the analysis code
-            // todo, implement sampling analysis
-            sampling_range: lading_payload::dogstatsd::ConfRange::Constant(0.0),
-            sampling_probability: 0.0,
+            sampling_range: dsd_config_defaults.sampling_range,
+            sampling_probability: dsd_config_defaults.sampling_probability,
             metric_weights,
-            value: ValueConf::default(),
-        })
+            value: value_range.unwrap_or(dsd_config_defaults.value),
+        };
+
+        config.valid().expect("Error validating dogstatsd config");
+
+        Ok(config)
     }
 }
 
@@ -213,6 +257,8 @@ pub fn analyze_msgs(
     let mut msg_stats = DogStatsDBatchStats {
         name_length: DDSketch::new(default_config),
         num_values: DDSketch::new(default_config),
+        value_range: DDSketch::new(default_config),
+        values_that_are_floats: 0,
         num_tags: DDSketch::new(default_config),
         tag_total_length: DDSketch::new(default_config),
         num_unicode_tags: DDSketch::new(default_config),
@@ -275,8 +321,14 @@ pub fn analyze_msgs(
                 continue;
             }
         };
-        // todo push this down into DogStatsDMsg
-        let num_values = metric_msg.values.split(':').count() as f64;
+
+        let num_values = metric_msg.values.len() as f64;
+        for value in &metric_msg.values {
+            msg_stats.value_range.add(*value);
+            if *value != value.round() {
+                msg_stats.values_that_are_floats += 1;
+            }
+        }
 
         let mut num_unicode_tags = 0_f64;
         let num_tags = metric_msg.tags.len() as f64;
@@ -447,10 +499,13 @@ mod tests {
             num_unicode_tags: DDSketch::new(config),
             kind: HashMap::new(),
             total_unique_tags: 0,
-            num_contexts: 0,
+            num_contexts: 1,
             num_values: DDSketch::new(config),
+            value_range: DDSketch::new(config),
+            values_that_are_floats: 0,
             num_msgs: 4,
             num_msgs_with_multivalue: 0,
+            reader_analytics: None,
         };
 
         stats.name_length.add(10.0);
@@ -458,15 +513,8 @@ mod tests {
         stats.name_length.add(10.0);
         stats.name_length.add(10.0);
 
-        let lading_config = stats.to_lading_config().unwrap();
-        let name_length = match lading_config.inner {
-            lading::generator::Inner::DogStatsD(lading_payload::dogstatsd::Config {
-                name_length,
-                ..
-            }) => name_length,
-            _ => panic!("Wrong config type"),
-        };
-        assert_eq!(lading_config.name_length, lading_payload::dogstatsd::ConfRange::Inclusive{min: 10, max: 10});
+        let lading_config = stats.to_lading_payload_config().unwrap();
+        assert_eq!(lading_config.name_length, lading_payload::dogstatsd::ConfRange::Constant(10));
     }
 
     #[test]
@@ -475,7 +523,7 @@ mod tests {
             b"my.metric:1|g\nmy.metric:2|g\nother.metric:20|d|#env:staging\nother.thing:10|d|#datacenter:prod\n";
         let mut reader = DogStatsDReader::new(&payload[..]).unwrap();
         let res = analyze_msgs(&mut reader).unwrap();
-        let lading_config = res.to_lading_config().unwrap();
+        let lading_config = res.to_lading_payload_config().unwrap();
 
         assert_eq!(lading_config.metric_weights, lading_payload::dogstatsd::MetricWeights::new(0, 2, 0, 2, 0, 0));
     }
@@ -492,8 +540,11 @@ mod tests {
             total_unique_tags: 0,
             num_contexts: 0,
             num_values: DDSketch::new(config),
+            value_range: DDSketch::new(config),
+            values_that_are_floats: 0,
             num_msgs: 4,
             num_msgs_with_multivalue: 0,
+            reader_analytics: None,
         };
 
         let mut metric_map = HashMap::new();

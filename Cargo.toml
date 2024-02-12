@@ -24,14 +24,16 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 divan = "0.1.5"
 smallvec = "2.0.0-alpha.1"
 pcap-file = "2.0.0-rc1"
-lading-payload = { git = "https://github.com/DataDog/lading.git", branch = "sopell/generate-serialize-impl" }
-lading-throttle = { git = "https://github.com/DataDog/lading.git", branch = "sopell/generate-serialize-impl" }
-lading = { git = "https://github.com/DataDog/lading.git", branch = "sopell/generate-serialize-impl" }
+lading-payload = { git = "https://github.com/DataDog/lading.git", rev = "cd7bd9d477707d375b2f841e361587af48d30e88" }
+lading-throttle = { git = "https://github.com/DataDog/lading.git", rev = "cd7bd9d477707d375b2f841e361587af48d30e88" }
+lading = { git = "https://github.com/DataDog/lading.git", rev = "cd7bd9d477707d375b2f841e361587af48d30e88"  }
 pnet = "0.34.0"
+serde = { version = "*", features = ["derive"]}
 serde_yaml = "0.9.31"
 sketches-ddsketch = "0.2.2"
 chrono = "0.4.33"
 human_bytes = "0.4.3"
+serde_json = "1.0.113"
 
 
 
