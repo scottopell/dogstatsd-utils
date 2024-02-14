@@ -96,6 +96,8 @@ fn main() -> Result<(), AnalyzeError> {
     println!("# unicode tags per msg:\n{}", sketch_to_string(&msg_stats.num_unicode_tags));
     println!("# of Unique Tags:\n\t{}", msg_stats.total_unique_tags);
     println!("# of Contexts:\n\t{}", msg_stats.num_contexts);
+    println!("Unique Tag / # Contexts ratio:\n\t{:.2}", (msg_stats.total_unique_tags as f64) / (msg_stats.num_contexts as f64));
+
     println!();
     println!("Message Kind Breakdown:");
     for (kind, (cnt, per_type)) in msg_stats.kind.iter() {
