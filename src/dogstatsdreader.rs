@@ -1,9 +1,10 @@
-use std::io::BufReader;
 use std::io::BufRead;
+use std::io::BufReader;
 use std::io::Read;
 use std::time::Duration;
 
 use bytes::Bytes;
+use sketches_ddsketch::DDSketch;
 use thiserror::Error;
 use tracing::{debug, error, info};
 
@@ -43,11 +44,12 @@ impl std::fmt::Display for Transport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Analytics {
     pub total_packets: u64,
     pub total_bytes: u64,
     pub total_messages: u64,
+    pub message_length: DDSketch,
     /// First timestamp seen in the stream, nanoseconds since epoch
     pub earliest_timestamp: Duration,
     /// Most recent timestamp seen in the stream, nanoseconds since epoch
@@ -62,6 +64,7 @@ impl Analytics {
             total_packets: 0,
             total_bytes: 0,
             total_messages: 0,
+            message_length: DDSketch::default(),
             earliest_timestamp: Duration::ZERO,
             latest_timestamp: Duration::ZERO,
             transport_type,
@@ -78,11 +81,15 @@ impl Analytics {
         self.total_bytes as f64 / self.duration().as_secs() as f64
     }
 
-    pub fn to_lading_generator_config(&self, variant: lading_payload::Config) -> lading::generator::Inner {
+    pub fn to_lading_generator_config(
+        &self,
+        variant: lading_payload::Config,
+    ) -> lading::generator::Inner {
         // todo better default seed
         let seed: [u8; 32] = [12; 32];
         let bytes_per_second = byte_unit::Byte::from_bytes(self.average_bytes_per_second() as u128);
-        let maximum_prebuild_cache_size_bytes = byte_unit::Byte::from_unit(20.0, byte_unit::ByteUnit::MB).unwrap();
+        let maximum_prebuild_cache_size_bytes =
+            byte_unit::Byte::from_unit(20.0, byte_unit::ByteUnit::MB).unwrap();
         let throttle = lading_throttle::Config::Stable;
         match self.transport_type {
             Transport::Udp => lading::generator::Inner::Udp(lading::generator::udp::Config {
@@ -94,25 +101,24 @@ impl Analytics {
                 block_sizes: None,
                 throttle,
             }),
-            Transport::UnixDatagram => lading::generator::Inner::UnixDatagram(lading::generator::unix_datagram::Config {
-                seed,
-                path: "fill_me_in".into(),
-                variant,
-                bytes_per_second,
-                maximum_prebuild_cache_size_bytes,
-                block_sizes: None,
-                throttle,
-                block_cache_method: lading_payload::block::default_cache_method(),
-                parallel_connections: 1,
-            }),
+            Transport::UnixDatagram => {
+                lading::generator::Inner::UnixDatagram(lading::generator::unix_datagram::Config {
+                    seed,
+                    path: "fill_me_in".into(),
+                    variant,
+                    bytes_per_second,
+                    maximum_prebuild_cache_size_bytes,
+                    block_sizes: None,
+                    throttle,
+                    block_cache_method: lading_payload::block::default_cache_method(),
+                    parallel_connections: 1,
+                })
+            }
         }
     }
-
-
 }
 
-pub enum DogStatsDReader<'a>
-{
+pub enum DogStatsDReader<'a> {
     Replay(DogStatsDReplayReader<'a>),
     Utf8(Utf8DogStatsDReader<'a>),
     Pcap(PcapDogStatsDReader<'a>),
@@ -160,8 +166,7 @@ fn input_type_of(header: Bytes) -> InputType {
     InputType::Utf8
 }
 
-impl<'a> DogStatsDReader<'a>
-{
+impl<'a> DogStatsDReader<'a> {
     /// 'buf' should point either to the beginning of a utf-8 encoded stream of
     /// DogStatsD messages, or to the beginning of a DogStatsD Replay/Capture file
     /// Either sequence can be optionally zstd encoded, it will be automatically

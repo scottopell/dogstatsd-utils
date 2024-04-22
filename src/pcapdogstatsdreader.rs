@@ -1,9 +1,12 @@
-use std::{collections::VecDeque, str::Utf8Error, io::{BufRead}};
+use std::{collections::VecDeque, io::BufRead, str::Utf8Error};
 use thiserror::Error;
 
 use tracing::{debug, error, warn};
 
-use crate::{dogstatsdreader, pcapreader::{PcapReader, PcapReaderError}};
+use crate::{
+    dogstatsdreader,
+    pcapreader::{PcapReader, PcapReaderError},
+};
 
 #[derive(Error, Debug)]
 pub enum PcapDogStatsDReaderError {
@@ -13,15 +16,13 @@ pub enum PcapDogStatsDReaderError {
     InvalidUtf8Sequence(Utf8Error),
 }
 
-pub struct PcapDogStatsDReader<'a>
-{
+pub struct PcapDogStatsDReader<'a> {
     pcap_reader: PcapReader<'a>,
     current_messages: VecDeque<String>,
     analytics: dogstatsdreader::Analytics,
 }
 
-impl<'a> PcapDogStatsDReader<'a>
-{
+impl<'a> PcapDogStatsDReader<'a> {
     pub fn new(byte_reader: impl BufRead + 'a) -> Result<Self, PcapDogStatsDReaderError> {
         match PcapReader::new(byte_reader) {
             Ok(reader) => Ok(PcapDogStatsDReader {
@@ -41,6 +42,7 @@ impl<'a> PcapDogStatsDReader<'a>
         if let Some(line) = self.current_messages.pop_front() {
             s.insert_str(0, &line);
             self.analytics.total_messages += 1;
+            self.analytics.message_length.add(line.len() as f64);
             return Ok(1);
         }
         let header = self.pcap_reader.header;

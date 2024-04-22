@@ -1,17 +1,17 @@
 use chrono::{NaiveDateTime, TimeZone, Utc};
-use std::time::Duration;
 use human_bytes::human_bytes;
+use std::time::Duration;
 
-use sketches_ddsketch::DDSketch;
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
 use dogstatsd_utils::dogstatsdreader::DogStatsDReader;
 use dogstatsd_utils::init_logging;
+use sketches_ddsketch::DDSketch;
 
 use std::fs::{self};
-use thiserror::Error;
 use std::io::{self};
 use std::path::Path;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AnalyzeError {
@@ -35,13 +35,19 @@ struct Args {
     /// Emit lading DSD config
     #[arg(long, short, default_value_t = false)]
     lading_config: bool,
+
+    /// Show all unique tags with count
+    #[arg(long, short, default_value_t = false)]
+    print_unique_tags: bool,
 }
 
 /// Prints out a quick summary of a given sketch
 /// Future improvement would be a visual histogram in the terminal
 /// similar to what `histo` offered
 fn sketch_to_string(sketch: &DDSketch) -> String {
-    let (Some(min), Some(max), Some(sum), count) = (sketch.min(), sketch.max(), sketch.sum(), sketch.count()) else {
+    let (Some(min), Some(max), Some(sum), count) =
+        (sketch.min(), sketch.max(), sketch.sum(), sketch.count())
+    else {
         return "No data".to_string();
     };
     let mean = sum / count as f64;
@@ -51,12 +57,12 @@ fn sketch_to_string(sketch: &DDSketch) -> String {
     let sixty = sketch.quantile(0.6).unwrap().unwrap();
     let eighty = sketch.quantile(0.8).unwrap().unwrap();
 
-
     format!("\tmin: {}\n\t0.2: {:.1}\n\t0.4: {:.1}\n\t0.5: {:.1}\n\t0.6: {:.1}\n\t0.8: {:.1}\n\tmax: {}\n\tcount: {}", min, twenty, fourty, mean, sixty, eighty, max, count)
 }
 
 fn epoch_duration_to_datetime(epoch: Duration) -> chrono::DateTime<chrono::Utc> {
-    let naive_datetime = NaiveDateTime::from_timestamp_nanos(epoch.as_nanos().try_into().unwrap()).unwrap();
+    let naive_datetime =
+        NaiveDateTime::from_timestamp_nanos(epoch.as_nanos().try_into().unwrap()).unwrap();
     Utc.from_utc_datetime(&naive_datetime)
 }
 
@@ -83,20 +89,44 @@ fn main() -> Result<(), AnalyzeError> {
         println!("\tLast packet time: {}", last_timestamp.to_rfc3339());
         println!("\tDuration: {:?}", reader_analytics.duration());
         println!("\tTotal Packets: {}", reader_analytics.total_packets);
-        println!("\tTotal Bytes: {}", human_bytes(reader_analytics.total_bytes as f64));
+        println!(
+            "\tTotal Bytes: {}",
+            human_bytes(reader_analytics.total_bytes as f64)
+        );
         println!("\tTotal Messages: {}", reader_analytics.total_messages);
 
-        println!("\tAverage Bytes Per Second:  {} per second", human_bytes(reader_analytics.average_bytes_per_second()));
+        println!(
+            "\tAverage Bytes Per Second:  {} per second",
+            human_bytes(reader_analytics.average_bytes_per_second())
+        );
+
+        println!(
+            "\tMessage Length:\n{}",
+            sketch_to_string(&reader_analytics.message_length)
+        );
     }
 
     println!("Traffic Analytics:");
     println!("Name Length:\n{}", sketch_to_string(&msg_stats.name_length));
-    println!("# values per msg:\n{}", sketch_to_string(&msg_stats.num_values));
+    println!(
+        "Tag Length:\n{}",
+        sketch_to_string(&msg_stats.tag_total_length)
+    );
+    println!(
+        "# values per msg:\n{}",
+        sketch_to_string(&msg_stats.num_values)
+    );
     println!("# tags per msg:\n{}", sketch_to_string(&msg_stats.num_tags));
-    println!("# unicode tags per msg:\n{}", sketch_to_string(&msg_stats.num_unicode_tags));
-    println!("# of Unique Tags:\n\t{}", msg_stats.total_unique_tags);
+    println!(
+        "# unicode tags per msg:\n{}",
+        sketch_to_string(&msg_stats.num_unicode_tags)
+    );
+    println!("# of Unique Tags:\n\t{}", msg_stats.unique_tags.len());
     println!("# of Contexts:\n\t{}", msg_stats.num_contexts);
-    println!("Unique Tag / # Contexts ratio:\n\t{:.2}", (msg_stats.total_unique_tags as f64) / (msg_stats.num_contexts as f64));
+    println!(
+        "Unique Tag / # Contexts ratio:\n\t{:.2}",
+        (msg_stats.unique_tags.len() as f64) / (msg_stats.num_contexts as f64)
+    );
 
     println!();
     println!("Message Kind Breakdown:");
@@ -108,9 +138,22 @@ fn main() -> Result<(), AnalyzeError> {
             }
         }
     }
+    if args.print_unique_tags {
+        println!("Unique tags:");
+        let mut unique_tags: Vec<(&String, &u32)> = msg_stats.unique_tags.iter().collect();
+
+        unique_tags.sort_by(|a, b| a.1.cmp(b.1));
+
+        // Print sorted entries
+        for (key, value) in unique_tags {
+            println!("{}  {}", value, key);
+        }
+    }
 
     if args.lading_config {
-        let str_lading_config = msg_stats.to_lading_config_str().expect("Error converting to lading config");
+        let str_lading_config = msg_stats
+            .to_lading_config_str()
+            .expect("Error converting to lading config");
         println!("Lading Config:\n---\n{}---", str_lading_config);
     }
 

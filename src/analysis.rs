@@ -1,13 +1,13 @@
 use sketches_ddsketch::{Config, DDSketch};
 
 use std::{
-    collections::{hash_map::RandomState, BTreeSet, HashMap, HashSet},
+    collections::{hash_map::RandomState, BTreeSet, HashMap},
     hash::{BuildHasher, Hasher},
     io::Write,
 };
 
-use thiserror::Error;
 use lading_payload::dogstatsd::{KindWeights, MetricWeights};
+use thiserror::Error;
 
 use crate::{
     dogstatsdmsg::{DogStatsDMetricType, DogStatsDMsg, DogStatsDMsgKind},
@@ -27,7 +27,7 @@ pub struct DogStatsDBatchStats {
     pub num_unicode_tags: DDSketch,
     pub kind: KindMap,
     pub num_contexts: u32,
-    pub total_unique_tags: u32,
+    pub unique_tags: HashMap<String, u32>,
     pub num_msgs_with_multivalue: u32,
     pub num_msgs: u32,
     pub reader_analytics: Option<crate::dogstatsdreader::Analytics>,
@@ -45,12 +45,16 @@ pub enum Error {
 
 /// Given a DDSketch, return a lading_payload::dogstatsd::ConfRange based on the 20th and 80th percentiles
 /// Returns None if sketch is empty or if either percentile would exceed the given T
-fn sketch_to_confrange<T>(sketch: &DDSketch) -> Option<lading_payload::dogstatsd::ConfRange<T>> where T: PartialOrd + Copy + TryFrom<u64> {
+fn sketch_to_confrange<T>(sketch: &DDSketch) -> Option<lading_payload::dogstatsd::ConfRange<T>>
+where
+    T: PartialOrd + Copy + TryFrom<u64>,
+{
     if sketch.count() == 0 {
         return None;
     }
     // quantiles are valid if the count is greater than 0
-    let (Some(min), Some(max)) = (sketch.quantile(0.2).unwrap(), sketch.quantile(0.8).unwrap()) else {
+    let (Some(min), Some(max)) = (sketch.quantile(0.2).unwrap(), sketch.quantile(0.8).unwrap())
+    else {
         return None;
     };
     let min = min as u64;
@@ -71,7 +75,7 @@ fn sketch_to_confrange<T>(sketch: &DDSketch) -> Option<lading_payload::dogstatsd
             Ok(v) => v,
             Err(_) => return None,
         };
-        Some(lading_payload::dogstatsd::ConfRange::Inclusive{min, max})
+        Some(lading_payload::dogstatsd::ConfRange::Inclusive { min, max })
     }
 }
 
@@ -91,8 +95,12 @@ impl DogStatsDBatchStats {
         let num_gauge = *metric_map.get(&DogStatsDMetricType::Gauge).unwrap_or(&0);
         let num_set = *metric_map.get(&DogStatsDMetricType::Set).unwrap_or(&0);
         let num_timer = *metric_map.get(&DogStatsDMetricType::Timer).unwrap_or(&0);
-        let num_histogram = *metric_map.get(&DogStatsDMetricType::Histogram).unwrap_or(&0);
-        let num_distribution = *metric_map.get(&DogStatsDMetricType::Distribution).unwrap_or(&0);
+        let num_histogram = *metric_map
+            .get(&DogStatsDMetricType::Histogram)
+            .unwrap_or(&0);
+        let num_distribution = *metric_map
+            .get(&DogStatsDMetricType::Distribution)
+            .unwrap_or(&0);
 
         if *total_metrics < u8::MAX as u32 {
             return lading_payload::dogstatsd::MetricWeights::new(
@@ -105,7 +113,9 @@ impl DogStatsDBatchStats {
             );
         }
 
-        let scale_factor = (num_count + num_gauge + num_set + num_timer + num_histogram + num_distribution) as f32 / u8::MAX as f32;
+        let scale_factor =
+            (num_count + num_gauge + num_set + num_timer + num_histogram + num_distribution) as f32
+                / u8::MAX as f32;
         let num_count = (num_count as f32 / scale_factor).round() as u8;
         let num_gauge = (num_gauge as f32 / scale_factor).round() as u8;
         let num_set = (num_set as f32 / scale_factor).round() as u8;
@@ -113,7 +123,14 @@ impl DogStatsDBatchStats {
         let num_histogram = (num_histogram as f32 / scale_factor).round() as u8;
         let num_distribution = (num_distribution as f32 / scale_factor).round() as u8;
 
-        lading_payload::dogstatsd::MetricWeights::new(num_count, num_gauge, num_timer, num_distribution, num_set, num_histogram)
+        lading_payload::dogstatsd::MetricWeights::new(
+            num_count,
+            num_gauge,
+            num_timer,
+            num_distribution,
+            num_set,
+            num_histogram,
+        )
     }
 
     fn get_kind_weights(&self) -> KindWeights {
@@ -155,14 +172,18 @@ impl DogStatsDBatchStats {
 
     pub fn to_lading_config(&self) -> Result<lading::generator::Config, Error> {
         let payload_config = self.to_lading_payload_config()?;
-        let generator_config = self.to_lading_generator_config(lading_payload::Config::DogStatsD(payload_config))?;
+        let generator_config =
+            self.to_lading_generator_config(lading_payload::Config::DogStatsD(payload_config))?;
 
         Ok(generator_config)
     }
 
     /// Given a DogStatsDBatchStats, return a lading_
     /// Correctly populates all payload parameters except for sampling
-    pub fn to_lading_generator_config(&self, variant: lading_payload::Config) -> Result<lading::generator::Config, Error> {
+    pub fn to_lading_generator_config(
+        &self,
+        variant: lading_payload::Config,
+    ) -> Result<lading::generator::Config, Error> {
         let Some(ref analytics) = self.reader_analytics else {
             return Err(Error::NotEnoughInfo);
         };
@@ -170,9 +191,7 @@ impl DogStatsDBatchStats {
         let inner_config = analytics.to_lading_generator_config(variant);
 
         let config = lading::generator::Config {
-            general: lading::generator::General {
-                id: None,
-            },
+            general: lading::generator::General { id: None },
             inner: inner_config,
         };
 
@@ -190,11 +209,10 @@ impl DogStatsDBatchStats {
         let name_length = sketch_to_confrange(&self.name_length);
         let num_contexts = lading_payload::dogstatsd::ConfRange::Constant(self.num_contexts);
 
-        let value_float_prob = self.values_that_are_floats as f32 / (self.value_range.count()) as f32;
-        let value_range = match sketch_to_confrange(&self.value_range) {
-            Some(v) => Some(lading_payload::dogstatsd::ValueConf::new(value_float_prob, v)),
-            None => None,
-        };
+        let value_float_prob =
+            self.values_that_are_floats as f32 / (self.value_range.count()) as f32;
+        let value_range = sketch_to_confrange(&self.value_range)
+            .map(|v| lading_payload::dogstatsd::ValueConf::new(value_float_prob, v));
 
         let tag_length = sketch_to_confrange(&self.tag_total_length);
         let tag_key_length = tag_length;
@@ -204,7 +222,8 @@ impl DogStatsDBatchStats {
 
         let multivalue_count = sketch_to_confrange(&self.num_values);
 
-        let multivalue_pack_probability = self.num_msgs_with_multivalue as f32 / (self.num_msgs) as f32;
+        let multivalue_pack_probability =
+            self.num_msgs_with_multivalue as f32 / (self.num_msgs) as f32;
 
         let kind_weights = self.get_kind_weights();
         let metric_weights = self.get_metric_weights();
@@ -248,11 +267,7 @@ where
     }
 }
 
-
-pub fn analyze_msgs(
-    reader: &mut DogStatsDReader,
-) -> Result<DogStatsDBatchStats, std::io::Error>
-{
+pub fn analyze_msgs(reader: &mut DogStatsDReader) -> Result<DogStatsDBatchStats, std::io::Error> {
     let default_config = Config::defaults();
     let mut msg_stats = DogStatsDBatchStats {
         name_length: DDSketch::new(default_config),
@@ -263,7 +278,7 @@ pub fn analyze_msgs(
         tag_total_length: DDSketch::new(default_config),
         num_unicode_tags: DDSketch::new(default_config),
         kind: HashMap::new(),
-        total_unique_tags: 0,
+        unique_tags: HashMap::new(),
         num_contexts: 0,
         num_msgs: 0,
         num_msgs_with_multivalue: 0,
@@ -286,7 +301,7 @@ pub fn analyze_msgs(
         .kind
         .insert(DogStatsDMsgKind::Metric, (0, Some(metric_type_map)));
 
-    let mut tags_seen: HashSet<String> = HashSet::new();
+    let mut tags_seen: HashMap<String, u32> = HashMap::new();
     let mut line = String::new();
     let mut context_map: HashMap<u64, u64> = HashMap::new();
     let hash_builder = RandomState::new();
@@ -334,7 +349,10 @@ pub fn analyze_msgs(
         let num_tags = metric_msg.tags.len() as f64;
         for tag in &metric_msg.tags {
             msg_stats.tag_total_length.add(tag.len() as f64);
-            tags_seen.insert(tag.to_string());
+            tags_seen
+                .entry(tag.to_string())
+                .and_modify(|e| *e += 1)
+                .or_insert(1);
             if !tag.is_ascii() {
                 num_unicode_tags += 1.0;
             }
@@ -378,18 +396,16 @@ pub fn analyze_msgs(
     }
 
     // Have read through the entire reader, lets try to grab the final "Analytics" if it exists
-    msg_stats.reader_analytics = reader.get_analytics().expect("Error getting analytics from reader");
-    msg_stats.total_unique_tags = tags_seen.len() as u32;
+    msg_stats.reader_analytics = reader
+        .get_analytics()
+        .expect("Error getting analytics from reader");
+    msg_stats.unique_tags = tags_seen;
     msg_stats.num_contexts = context_map.len() as u32;
     Ok(msg_stats)
 }
 
 #[cfg(test)]
 mod tests {
-
-
-
-
 
     use super::*;
 
@@ -491,14 +507,14 @@ mod tests {
 
     #[test]
     fn batch_stats_to_lading_config() {
-        let config  = Config::defaults();
+        let config = Config::defaults();
         let mut stats = DogStatsDBatchStats {
             name_length: DDSketch::new(config),
             num_tags: DDSketch::new(config),
             tag_total_length: DDSketch::new(config),
             num_unicode_tags: DDSketch::new(config),
             kind: HashMap::new(),
-            total_unique_tags: 0,
+            unique_tags: HashMap::new(),
             num_contexts: 1,
             num_values: DDSketch::new(config),
             value_range: DDSketch::new(config),
@@ -514,7 +530,10 @@ mod tests {
         stats.name_length.add(10.0);
 
         let lading_config = stats.to_lading_payload_config().unwrap();
-        assert_eq!(lading_config.name_length, lading_payload::dogstatsd::ConfRange::Constant(10));
+        assert_eq!(
+            lading_config.name_length,
+            lading_payload::dogstatsd::ConfRange::Constant(10)
+        );
     }
 
     #[test]
@@ -525,19 +544,22 @@ mod tests {
         let res = analyze_msgs(&mut reader).unwrap();
         let lading_config = res.to_lading_payload_config().unwrap();
 
-        assert_eq!(lading_config.metric_weights, lading_payload::dogstatsd::MetricWeights::new(0, 2, 0, 2, 0, 0));
+        assert_eq!(
+            lading_config.metric_weights,
+            lading_payload::dogstatsd::MetricWeights::new(0, 2, 0, 2, 0, 0)
+        );
     }
 
     #[test]
     fn metric_weight_scale() {
-        let config  = Config::defaults();
+        let config = Config::defaults();
         let mut stats = DogStatsDBatchStats {
             name_length: DDSketch::new(config),
             num_tags: DDSketch::new(config),
             tag_total_length: DDSketch::new(config),
             num_unicode_tags: DDSketch::new(config),
             kind: HashMap::new(),
-            total_unique_tags: 0,
+            unique_tags: HashMap::new(),
             num_contexts: 0,
             num_values: DDSketch::new(config),
             value_range: DDSketch::new(config),
@@ -550,19 +572,29 @@ mod tests {
         let mut metric_map = HashMap::new();
         metric_map.insert(DogStatsDMetricType::Count, 2);
         metric_map.insert(DogStatsDMetricType::Distribution, 2);
-        stats.kind.insert(DogStatsDMsgKind::Metric, (4, Some(metric_map)));
+        stats
+            .kind
+            .insert(DogStatsDMsgKind::Metric, (4, Some(metric_map)));
 
         let metric_weights = stats.get_metric_weights();
 
-        assert_eq!(metric_weights, lading_payload::dogstatsd::MetricWeights::new(2, 0, 0, 2, 0, 0));
+        assert_eq!(
+            metric_weights,
+            lading_payload::dogstatsd::MetricWeights::new(2, 0, 0, 2, 0, 0)
+        );
 
         let mut metric_map = HashMap::new();
         metric_map.insert(DogStatsDMetricType::Count, 200);
         metric_map.insert(DogStatsDMetricType::Distribution, 200);
-        stats.kind.insert(DogStatsDMsgKind::Metric, (400, Some(metric_map)));
+        stats
+            .kind
+            .insert(DogStatsDMsgKind::Metric, (400, Some(metric_map)));
 
         let metric_weights = stats.get_metric_weights();
 
-        assert_eq!(metric_weights, lading_payload::dogstatsd::MetricWeights::new(128, 0, 0, 128, 0, 0));
+        assert_eq!(
+            metric_weights,
+            lading_payload::dogstatsd::MetricWeights::new(128, 0, 0, 128, 0, 0)
+        );
     }
 }

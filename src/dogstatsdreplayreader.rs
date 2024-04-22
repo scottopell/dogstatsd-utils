@@ -1,9 +1,10 @@
 use std::{collections::VecDeque, io::BufRead, str::Utf8Error, time::Duration};
 use thiserror::Error;
 
-
-
-use crate::{dogstatsdreader, replay::{ReplayReader, ReplayReaderError}};
+use crate::{
+    dogstatsdreader,
+    replay::{ReplayReader, ReplayReaderError},
+};
 
 pub mod dogstatsd {
     pub mod unix {
@@ -21,15 +22,13 @@ pub enum DogStatsDReplayReaderError {
     InvalidUtf8Sequence(Utf8Error),
 }
 
-pub struct DogStatsDReplayReader<'a>
-{
+pub struct DogStatsDReplayReader<'a> {
     replay_msg_reader: ReplayReader<'a>,
     current_messages: VecDeque<String>,
     analytics: dogstatsdreader::Analytics,
 }
 
-impl<'a> DogStatsDReplayReader<'a>
-{
+impl<'a> DogStatsDReplayReader<'a> {
     pub fn get_analytics(&self) -> Result<dogstatsdreader::Analytics, DogStatsDReplayReaderError> {
         Ok(self.analytics.clone())
     }
@@ -37,6 +36,7 @@ impl<'a> DogStatsDReplayReader<'a>
         if let Some(line) = self.current_messages.pop_front() {
             s.insert_str(0, &line);
             self.analytics.total_messages += 1;
+            self.analytics.message_length.add(line.len() as f64);
             return Ok(1);
         }
 
@@ -45,10 +45,10 @@ impl<'a> DogStatsDReplayReader<'a>
                 let timestamp = match self.replay_msg_reader.version {
                     crate::replay::CaptureFileVersion::V3 => {
                         Duration::from_nanos(msg.timestamp as u64)
-                    },
+                    }
                     crate::replay::CaptureFileVersion::V2 => {
                         Duration::from_secs(msg.timestamp as u64)
-                    },
+                    }
                     _ => {
                         panic!("Unexpected version in DogStatsDReplayReader::read_msg");
                     }
@@ -88,7 +88,9 @@ impl<'a> DogStatsDReplayReader<'a>
             Ok(reader) => Ok(DogStatsDReplayReader {
                 replay_msg_reader: reader,
                 current_messages: VecDeque::new(),
-                analytics: dogstatsdreader::Analytics::new(dogstatsdreader::Transport::UnixDatagram),
+                analytics: dogstatsdreader::Analytics::new(
+                    dogstatsdreader::Transport::UnixDatagram,
+                ),
             }),
             Err(e) => match e {
                 ReplayReaderError::NotAReplayFile => {
