@@ -1,8 +1,8 @@
-use std::io::{self, Read, BufRead};
 use byteorder::{ByteOrder, LittleEndian};
+use std::io::{self, BufRead, Read};
 
 use bytes::{Buf, Bytes, BytesMut};
-use prost::{Message, DecodeError};
+use prost::{DecodeError, Message};
 use tracing::warn;
 
 use crate::dogstatsdreplayreader::dogstatsd::unix::UnixDogstatsdMsg;
@@ -47,10 +47,21 @@ pub enum ReplayReaderError {
     NotAReplayFile,
     #[error("Unsupported replay version")]
     UnsupportedReplayVersion(u8),
+    #[error("Unexpected EOF")]
+    UnexpectedEof,
     #[error("IO Error")]
-    Io(#[from] io::Error),
+    Io(io::Error),
     #[error("Protobuf Decode error")]
     ProtoDecode(#[from] DecodeError),
+}
+
+impl From<io::Error> for ReplayReaderError {
+    fn from(e: io::Error) -> Self {
+        if e.kind() == io::ErrorKind::UnexpectedEof {
+            return ReplayReaderError::UnexpectedEof;
+        }
+        ReplayReaderError::Io(e)
+    }
 }
 
 /// header must point to at least 8 bytes
@@ -79,7 +90,6 @@ pub fn is_replay(mut header: Bytes) -> Result<(), ReplayReaderError> {
     header.advance(3); // consume next 3 bytes per contract
     Ok(())
 }
-
 
 impl<'a> ReplayReader<'a> {
     pub fn supported_versions() -> &'static [u8] {
@@ -272,12 +282,21 @@ mod tests {
     #[test]
     fn invalid_replay_bytes() {
         let replay = ReplayReader::new(&b"my.metric:1|g\n"[..]);
-        assert_eq!(discriminant(&replay.unwrap_err()), discriminant(&ReplayReaderError::NotAReplayFile));
+        assert_eq!(
+            discriminant(&replay.unwrap_err()),
+            discriminant(&ReplayReaderError::NotAReplayFile)
+        );
 
         let replay = ReplayReader::new(&b"abcdefghijklmnopqrstuvwxyz"[..]);
-        assert_eq!(discriminant(&replay.unwrap_err()), discriminant(&ReplayReaderError::NotAReplayFile));
+        assert_eq!(
+            discriminant(&replay.unwrap_err()),
+            discriminant(&ReplayReaderError::NotAReplayFile)
+        );
 
         let replay = ReplayReader::new(&b"\n\n\n\n\n\n\n\n\n\n\n\t\t\t\n\t\n"[..]);
-        assert_eq!(discriminant(&replay.unwrap_err()), discriminant(&ReplayReaderError::NotAReplayFile));
+        assert_eq!(
+            discriminant(&replay.unwrap_err()),
+            discriminant(&ReplayReaderError::NotAReplayFile)
+        );
     }
 }

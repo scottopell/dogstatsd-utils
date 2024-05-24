@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, io::BufRead, str::Utf8Error, time::Duration};
 use thiserror::Error;
+use tracing::warn;
 
 use crate::{
     dogstatsdreader,
@@ -77,6 +78,10 @@ impl<'a> DogStatsDReplayReader<'a> {
                 }
             }
             Ok(None) => Ok(0), // Read was validly issued, just nothing to be read.
+            Err(ReplayReaderError::UnexpectedEof) => {
+                warn!("Encountered unexpected Eof, likely a truncated file. File is incomplete and processing is done.");
+                Ok(0)
+            }
             Err(e) => {
                 panic!("Unexpected error from ReplayReader::read_msg: {:?}", e);
             }
