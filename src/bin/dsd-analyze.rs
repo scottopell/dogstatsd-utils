@@ -1,6 +1,7 @@
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use human_bytes::human_bytes;
 use std::time::Duration;
+use tracing::error;
 
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
@@ -29,8 +30,8 @@ pub enum AnalyzeError {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// File containing dogstatsd data
-    input: Option<String>,
+    /// File(s) containing dogstatsd data
+    input: Vec<String>,
 
     /// Emit lading DSD config
     #[arg(long, short, default_value_t = false)]
@@ -52,12 +53,15 @@ fn sketch_to_string(sketch: &DDSketch) -> String {
     };
     let mean = sum / count as f64;
     // should be safe to unwrap since we know we have data
+    let five = sketch.quantile(0.05).unwrap().unwrap();
     let twenty = sketch.quantile(0.2).unwrap().unwrap();
     let fourty = sketch.quantile(0.4).unwrap().unwrap();
     let sixty = sketch.quantile(0.6).unwrap().unwrap();
     let eighty = sketch.quantile(0.8).unwrap().unwrap();
+    let ninetyfive = sketch.quantile(0.95).unwrap().unwrap();
+    let ninetynine = sketch.quantile(0.99).unwrap().unwrap();
 
-    format!("\tmin: {}\n\t0.2: {:.1}\n\t0.4: {:.1}\n\t0.5: {:.1}\n\t0.6: {:.1}\n\t0.8: {:.1}\n\tmax: {}\n\tcount: {}", min, twenty, fourty, mean, sixty, eighty, max, count)
+    format!("\tmin: {}\n\t0.05: {:.1}\n\t0.2: {:.1}\n\t0.4: {:.1}\n\t0.5: {:.1}\n\t0.6: {:.1}\n\t0.8: {:.1}\n\t0.95: {:.1}\n\t0.99: {:.1}\n\tmax: {}\n\tcount: {}", min, five, twenty, fourty, mean, sixty, eighty, ninetyfive, ninetynine, max, count)
 }
 
 fn epoch_duration_to_datetime(epoch: Duration) -> chrono::DateTime<chrono::Utc> {
@@ -70,13 +74,14 @@ fn main() -> Result<(), AnalyzeError> {
     init_logging();
     let args = Args::parse();
 
-    let mut reader = if let Some(input_file) = args.input {
-        let file_path = Path::new(&input_file);
-
-        let file = fs::File::open(file_path)?;
-        DogStatsDReader::new(file)
-    } else {
-        DogStatsDReader::new(io::stdin().lock())
+    let mut reader = match args.input.len() {
+        1 => {
+            let file_path = Path::new(&args.input[0]);
+            let file = fs::File::open(file_path)?;
+            DogStatsDReader::new(file)
+        }
+        0 => DogStatsDReader::new(io::stdin().lock()),
+        _ => DogStatsDReader::from_paths(args.input),
     }?;
 
     let msg_stats = analyze_msgs(&mut reader)?;
