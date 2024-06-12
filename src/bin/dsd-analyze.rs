@@ -53,12 +53,15 @@ fn sketch_to_string(sketch: &DDSketch) -> String {
     };
     let mean = sum / count as f64;
     // should be safe to unwrap since we know we have data
+    let five = sketch.quantile(0.05).unwrap().unwrap();
     let twenty = sketch.quantile(0.2).unwrap().unwrap();
     let fourty = sketch.quantile(0.4).unwrap().unwrap();
     let sixty = sketch.quantile(0.6).unwrap().unwrap();
     let eighty = sketch.quantile(0.8).unwrap().unwrap();
+    let ninetyfive = sketch.quantile(0.95).unwrap().unwrap();
+    let ninetynine = sketch.quantile(0.99).unwrap().unwrap();
 
-    format!("\tmin: {}\n\t0.2: {:.1}\n\t0.4: {:.1}\n\t0.5: {:.1}\n\t0.6: {:.1}\n\t0.8: {:.1}\n\tmax: {}\n\tcount: {}", min, twenty, fourty, mean, sixty, eighty, max, count)
+    format!("\tmin: {}\n\t0.05: {:.1}\n\t0.2: {:.1}\n\t0.4: {:.1}\n\t0.5: {:.1}\n\t0.6: {:.1}\n\t0.8: {:.1}\n\t0.95: {:.1}\n\t0.99: {:.1}\n\tmax: {}\n\tcount: {}", min, five, twenty, fourty, mean, sixty, eighty, ninetyfive, ninetynine, max, count)
 }
 
 fn epoch_duration_to_datetime(epoch: Duration) -> chrono::DateTime<chrono::Utc> {
