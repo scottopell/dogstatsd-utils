@@ -1,6 +1,7 @@
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use human_bytes::human_bytes;
 use std::time::Duration;
+use tracing::error;
 
 use clap::Parser;
 use dogstatsd_utils::analysis::analyze_msgs;
@@ -29,8 +30,8 @@ pub enum AnalyzeError {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// File containing dogstatsd data
-    input: Option<String>,
+    /// File(s) containing dogstatsd data
+    input: Vec<String>,
 
     /// Emit lading DSD config
     #[arg(long, short, default_value_t = false)]
@@ -70,13 +71,14 @@ fn main() -> Result<(), AnalyzeError> {
     init_logging();
     let args = Args::parse();
 
-    let mut reader = if let Some(input_file) = args.input {
-        let file_path = Path::new(&input_file);
-
-        let file = fs::File::open(file_path)?;
-        DogStatsDReader::new(file)
-    } else {
-        DogStatsDReader::new(io::stdin().lock())
+    let mut reader = match args.input.len() {
+        1 => {
+            let file_path = Path::new(&args.input[0]);
+            let file = fs::File::open(file_path)?;
+            DogStatsDReader::new(file)
+        }
+        0 => DogStatsDReader::new(io::stdin().lock()),
+        _ => DogStatsDReader::from_paths(args.input),
     }?;
 
     let msg_stats = analyze_msgs(&mut reader)?;

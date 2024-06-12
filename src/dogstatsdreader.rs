@@ -122,6 +122,7 @@ pub enum DogStatsDReader<'a> {
     Replay(DogStatsDReplayReader<'a>),
     Utf8(Utf8DogStatsDReader<'a>),
     Pcap(PcapDogStatsDReader<'a>),
+    Multi(Vec<DogStatsDReader<'a>>),
 }
 
 enum InputType {
@@ -228,6 +229,15 @@ impl<'a> DogStatsDReader<'a> {
         }
     }
 
+    pub fn from_paths(paths: Vec<String>) -> Result<Self, DogStatsDReaderError> {
+        let mut readers = Vec::new();
+        for path in paths {
+            let file = std::fs::File::open(path)?;
+            readers.push(DogStatsDReader::new(file)?);
+        }
+        Ok(Self::Multi(readers))
+    }
+
     /// read_msg populates the given String with a dogstatsd message
     /// and returns the number of messages read (currently always 1)
     pub fn read_msg(&mut self, s: &mut String) -> Result<usize, DogStatsDReaderError> {
@@ -235,6 +245,25 @@ impl<'a> DogStatsDReader<'a> {
             Self::Utf8(r) => Ok(r.read_msg(s)?),
             Self::Replay(r) => Ok(r.read_msg(s)?),
             Self::Pcap(r) => Ok(r.read_msg(s)?),
+            Self::Multi(readers) => {
+                if let Some(first_reader) = readers.first_mut() {
+                    let num_read = first_reader.read_msg(s)?;
+                    if num_read == 0 {
+                        // remove the first reader from the list
+                        readers.remove(0);
+                        // if there are more readers, recursively call read_msg
+                        if !readers.is_empty() {
+                            self.read_msg(s)
+                        } else {
+                            Ok(0)
+                        }
+                    } else {
+                        Ok(num_read)
+                    }
+                } else {
+                    Ok(0)
+                }
+            }
         }
     }
 
@@ -245,6 +274,7 @@ impl<'a> DogStatsDReader<'a> {
             Self::Utf8(_r) => Ok(None),
             Self::Replay(r) => Ok(Some(r.get_analytics()?)),
             Self::Pcap(r) => Ok(Some(r.get_analytics()?)),
+            Self::Multi(_readers) => Ok(None),
         }
     }
 }
